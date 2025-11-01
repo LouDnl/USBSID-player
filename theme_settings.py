@@ -25,9 +25,10 @@ class ThemeSettingsWindow(QWidget):
         # Domyślne wartości
         self.settings = {
             'hue': 210,           # 0-360 (210 = niebieski odcień z oryginalnego motywu)
-            'saturation': 50,     # 0-100 (50 = średnie nasycenie)
+            'saturation': 50,     # 0-512 (50 = średnie nasycenie)
             'brightness': 50,     # 0-100 (50 = średnia jasność)
-            'temperature': 50     # 0-100 (0=cold/blue, 50=neutral, 100=warm/orange)
+            'temperature': 256,   # 0-512 (256 = neutralny, poniżej=zimno/blue, powyżej=ciepło/orange)
+            'contrast': 256       # 0-512 (256 = neutralny, poniżej=niski kontrast, powyżej=wysoki kontrast)
         }
         
         # Ustawienie gracza
@@ -46,7 +47,7 @@ class ThemeSettingsWindow(QWidget):
     def init_ui(self):
         """Inicjalizacja interfejsu użytkownika"""
         self.setWindowTitle("Theme Settings - Color Control")
-        self.setFixedSize(450, 580)  # Zwiększono dla nowego przełącznika
+        self.setFixedSize(450, 640)  # Zwiększono dla nowego suwaka Contrast
         
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)  # Zmniejszono marginesy
@@ -117,10 +118,17 @@ class ThemeSettingsWindow(QWidget):
         )
         sliders_layout.addLayout(self.brightness_slider['layout'])
         
+        # CONTRAST slider (0-512)
+        self.contrast_slider = self.create_slider_with_label(
+            "Contrast", 0, 512, self.settings['contrast'],
+            "0=Low contrast, 256=Neutral, 512=High contrast"
+        )
+        sliders_layout.addLayout(self.contrast_slider['layout'])
+        
         # TEMPERATURE slider (0-255)
         self.temperature_slider = self.create_slider_with_label(
             "Temperature", 0, 512, self.settings['temperature'],
-            "0=Cold blue, 512=Warm orange"
+            "0=Cold blue, 256=Neutral, 512=Warm orange"
         )
         sliders_layout.addLayout(self.temperature_slider['layout'])
         
@@ -136,7 +144,7 @@ class ThemeSettingsWindow(QWidget):
         self.reset_button.clicked.connect(self.reset_to_defaults)
         self.reset_button.setFixedHeight(42)
         
-        self.apply_button = QPushButton("Apply & Close")
+        self.apply_button = QPushButton("Close")
         self.apply_button.clicked.connect(self.apply_and_close)
         self.apply_button.setFixedHeight(42)
         
@@ -152,6 +160,7 @@ class ThemeSettingsWindow(QWidget):
         self.hue_slider['slider'].valueChanged.connect(self.on_slider_changed)
         self.saturation_slider['slider'].valueChanged.connect(self.on_slider_changed)
         self.brightness_slider['slider'].valueChanged.connect(self.on_slider_changed)
+        self.contrast_slider['slider'].valueChanged.connect(self.on_slider_changed)
         self.temperature_slider['slider'].valueChanged.connect(self.on_slider_changed)
     
     def create_slider_with_label(self, name, min_val, max_val, current_val, tooltip):
@@ -215,6 +224,7 @@ class ThemeSettingsWindow(QWidget):
         self.settings['hue'] = self.hue_slider['slider'].value()
         self.settings['saturation'] = self.saturation_slider['slider'].value()
         self.settings['brightness'] = self.brightness_slider['slider'].value()
+        self.settings['contrast'] = self.contrast_slider['slider'].value()
         self.settings['temperature'] = self.temperature_slider['slider'].value()
         
         # DEBUG
@@ -241,7 +251,8 @@ class ThemeSettingsWindow(QWidget):
         self.hue_slider['slider'].setValue(210)
         self.saturation_slider['slider'].setValue(50)
         self.brightness_slider['slider'].setValue(50)
-        self.temperature_slider['slider'].setValue(50)
+        self.contrast_slider['slider'].setValue(256)
+        self.temperature_slider['slider'].setValue(256)
         
         # on_slider_changed zostanie wywołane automatycznie
     
@@ -353,21 +364,24 @@ class ThemeSettingsWindow(QWidget):
             self.saturation_slider['slider'].setValue(settings['saturation'])
         if 'brightness' in settings:
             self.brightness_slider['slider'].setValue(settings['brightness'])
+        if 'contrast' in settings:
+            self.contrast_slider['slider'].setValue(settings['contrast'])
         if 'temperature' in settings:
             self.temperature_slider['slider'].setValue(settings['temperature'])
 
 
 # Funkcje pomocnicze do konwersji kolorów
-def apply_theme_to_color(base_color, hue, saturation, brightness, temperature):
+def apply_theme_to_color(base_color, hue, saturation, brightness, contrast, temperature):
     """
     Zastosuj globalne ustawienia motywu do koloru bazowego
     
     Args:
         base_color: tuple (r, g, b) w zakresie 0-255
         hue: 0-360 (wartość docelowego odcienia, nie shift!)
-        saturation: 0-100 (mnożnik nasycenia, 50=bez zmian)
+        saturation: 0-512 (mnożnik nasycenia z krzywą potęgową, 50=bez zmian)
         brightness: 0-100 (mnożnik jasności, 50=bez zmian)
-        temperature: 0-100 (0=cold/blue, 50=neutral, 100=warm/orange)
+        contrast: 0-512 (256=neutralny, poniżej=niski kontrast, powyżej=wysoki kontrast)
+        temperature: 0-512 (256=neutralny, poniżej=zimno/blue, powyżej=ciepło/orange)
     
     Returns:
         tuple (r, g, b) w zakresie 0-255
@@ -379,21 +393,28 @@ def apply_theme_to_color(base_color, hue, saturation, brightness, temperature):
     # USTAW HUE jako wartość absolutną (nie dodawaj!)
     h = hue / 360.0
     
-    # Zastosuj SATURATION (50 = 1.0x, 0 = 0x, 100 = 2.0x)
-    saturation_multiplier = saturation / 50.0
+    # Zastosuj SATURATION z krzywą potęgową (50 = domyślny, zakres 0-512)
+    # Płynniejsze przejście z 0 (szarość) do niskiego nasycenia
+    saturation_multiplier = pow(saturation / 50.0, 0.4) if saturation > 0 else 0.0
     s = min(1.0, s * saturation_multiplier)
     
     # Zastosuj BRIGHTNESS (50 = 1.0x, 0 = 0x, 100 = 2.0x)
     brightness_multiplier = brightness / 50.0
     l = min(1.0, l * brightness_multiplier)
     
+    # Zastosuj CONTRAST na luminancji (256 = neutralny)
+    # Przesuwamy luminancję bliżej lub dalej od 0.5 (środek)
+    contrast_multiplier = contrast / 256.0
+    l = 0.5 + (l - 0.5) * contrast_multiplier
+    l = max(0.0, min(1.0, l))
+    
     # Konwertuj z powrotem na RGB
     r, g, b = colorsys.hls_to_rgb(h, l, s)
     
     # Zastosuj TEMPERATURE (mieszaj z ciepłym/zimnym odcieniem)
     # Jeżeli saturation == 0, pozostaw idealną skalę szarości (pomijamy temperaturę)
-    if temperature != 50 and saturation > 0:
-        temp_factor = (temperature - 50) / 50.0  # -1.0 to 1.0
+    if temperature != 256 and saturation > 0:
+        temp_factor = (temperature - 256) / 256.0  # -1.0 to 1.0
         
         if temp_factor > 0:  # Warm (orange tint)
             r = min(1.0, r + temp_factor * 0.15)

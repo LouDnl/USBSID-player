@@ -39,6 +39,33 @@ class WindowsAPIManagerMixin:
     #     WINDOWS API HELPER FUNCTIONS
     # ================================================
     
+    def _get_engine_hints(self):
+        """
+        Get search hints for current audio engine.
+        Dynamically determines hints based on self.audio_engine value.
+        
+        Returns:
+            list: Search hints for window title matching (e.g., ['jsidplay2', 'Bumper.sid', 'jsidplay2-console.exe'])
+        """
+        # Get the engine name from self.audio_engine
+        engine_name = getattr(self, 'audio_engine', 'sidplayfp')
+        
+        # Map engine names to executable/hint names
+        if engine_name == "jsidplay2":
+            engine_hint = 'jsidplay2'
+            engine_path = getattr(self, 'jsidplay2_path', '')
+        else:
+            engine_hint = 'sidplayfp'
+            engine_path = getattr(self, 'sidplayfp_path', '')
+        
+        hints = [
+            engine_hint,
+            os.path.basename(self.sid_file) if self.sid_file else '',
+            os.path.basename(engine_path) if engine_path else ''
+        ]
+        
+        return hints
+    
     def setup_windows_api(self):
         """
         Setup Windows API functions for finding console window and sending keys.
@@ -157,7 +184,7 @@ class WindowsAPIManagerMixin:
     
     def hide_console_window_for_sidplay(self):
         """
-        Hide console window for sidplayfp after it's found.
+        Hide console window for sidplayfp/jsidplay2 after it's found.
         
         Attempts to find and hide the console window completely (no taskbar icon).
         Retries for up to 3 seconds with short intervals to handle delayed window creation.
@@ -170,11 +197,7 @@ class WindowsAPIManagerMixin:
         if sys.platform != "win32" or not self.sid_file:
             return False
             
-        hints = [
-            'sidplayfp',
-            os.path.basename(self.sid_file),
-            os.path.basename(self.sidplayfp_path)
-        ]
+        hints = self._get_engine_hints()
         
         # Try for 3 seconds with short intervals (150 attempts * 0.02s)
         for attempt in range(150):
@@ -211,11 +234,7 @@ class WindowsAPIManagerMixin:
         if sys.platform != "win32" or not self.process or not self.sid_file:
             return False
             
-        hints = [
-            'sidplayfp',
-            os.path.basename(self.sid_file),
-            os.path.basename(self.sidplayfp_path)
-        ]
+        hints = self._get_engine_hints()
         
         hwnd = self.find_console_hwnd_for_sidplay(hints)
         if not hwnd:
@@ -259,11 +278,7 @@ class WindowsAPIManagerMixin:
         if sys.platform != "win32" or not self.process or not self.sid_file:
             return False
             
-        hints = [
-            'sidplayfp',
-            os.path.basename(self.sid_file),
-            os.path.basename(self.sidplayfp_path)
-        ]
+        hints = self._get_engine_hints()
         
         hwnd = self.find_console_hwnd_for_sidplay(hints)
         if not hwnd:
@@ -312,11 +327,7 @@ class WindowsAPIManagerMixin:
         
         if sys.platform == "win32":
             # On Windows use PostMessage
-            hints = [
-                'sidplayfp',
-                os.path.basename(self.sid_file),
-                os.path.basename(self.sidplayfp_path)
-            ]
+            hints = self._get_engine_hints()
             
             hwnd = self.find_console_hwnd_for_sidplay(hints)
             if not hwnd:
@@ -354,94 +365,61 @@ class WindowsAPIManagerMixin:
         """
         Send sequence of characters to jsidplay2 console (each character + Enter).
         
-        Cross-platform implementation:
-        - Windows: Uses PostMessage to send characters to console window
-        - Other systems: Uses stdin input with newlines via send_input_to_sidplay()
+        Uses STDIN ONLY - PostMessage does NOT work with hidden console windows!
+        
+        jsidplay2 console is started with SW_HIDE (hidden), so PostMessage API 
+        cannot deliver keystrokes. stdin is the ONLY reliable method.
         
         Args:
             char_list (list): List of characters to send
-                             (e.g., ['1', '2', '3'] for subtunes 1, 2, 3)
+                             (e.g., ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c'] for muting)
         
         Returns:
             bool: True if all characters were sent successfully, False on error
             
         Note:
-            Requires self.send_input_to_sidplay() method for non-Windows fallback
-            Each character is followed by an Enter key press
+            Process MUST be created with stdin=subprocess.PIPE for this to work
+            Each character is followed by a newline
+            Critical timing: 100ms between each character for jsidplay2 to process
         """
         if not self.process or not self.sid_file:
-            self.debug_console.log(f"[WINAPI] Cannot send sequence: process={bool(self.process)}, sid_file={bool(self.sid_file)}")
+            self.debug_console.log(f"[STDIN] ✗ Cannot send sequence: process={bool(self.process)}, sid_file={bool(self.sid_file)}")
             return False
         
-        if sys.platform != "win32":
-            # On other systems send to stdin
-            self.debug_console.log(f"[WINAPI] Non-Windows platform detected - using stdin fallback")
-            for char in char_list:
-                self.send_input_to_sidplay(char + '\n')
-            return True
-        
-        # On Windows use PostMessage
-        hints = [
-            'jsidplay2',
-            os.path.basename(self.sid_file),
-            'jsidplay2-console.exe'
-        ]
-        
-        self.debug_console.log(f"[WINAPI] 🔍 Searching for jsidplay2 console window with hints: {hints}")
-        hwnd = self.find_console_hwnd_for_sidplay(hints)
-        
-        if not hwnd:
-            self.debug_console.log(f"[WINAPI] ✗ Console window NOT FOUND for jsidplay2")
-            self.debug_console.log(f"[WINAPI] 💡 Debug info:")
-            self.debug_console.log(f"[WINAPI]   - SID file: {self.sid_file}")
-            self.debug_console.log(f"[WINAPI]   - Hints: jsidplay2, {os.path.basename(self.sid_file)}, jsidplay2-console.exe")
-            self.debug_console.log(f"[WINAPI]   - Make sure jsidplay2 window is visible")
+        if self.process.stdin is None:
+            self.debug_console.log(f"[STDIN] ✗ Process stdin is None - process may not be created with stdin=PIPE")
             return False
-        
-        self.debug_console.log(f"[WINAPI] ✓ Console window FOUND: HWND={hex(hwnd)}")
-        
-        # Map of scancodes for keys
-        scan_map = {
-            '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06,
-            '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A,
-            'a': 0x1E, 'b': 0x30, 'c': 0x2E, 'q': 0x10,
-            'Enter': 0x1C
-        }
-        
-        VK_RETURN = 0x0D  # VK code for Enter
         
         try:
-            for char in char_list:
-                # Send character
-                if char.lower() in scan_map:
-                    scan = scan_map[char.lower()]
-                    vk_code = ord(char.upper())
-                    repeat = 1
-                    extended = 0
-                    
-                    lparam_down = (repeat & 0xFFFF) | ((scan & 0xFF) << 16) | (extended << 24)
-                    lparam_up = lparam_down | (1 << 30) | (1 << 31)
-                    
-                    # DEBUG: Log the actual values being sent
-                    self.debug_console.log(f"[WINAPI] Sending '{char}': VK=0x{vk_code:02X}, SCAN=0x{scan:02X}, HWND={hex(hwnd)}")
-                    
-                    self.PostMessageW(hwnd, self.WM_KEYDOWN, vk_code, lparam_down)
-                    self.PostMessageW(hwnd, self.WM_KEYUP, vk_code, lparam_up)
-                    self.debug_console.log(f"[JSIDPLAY2] ✓ Sent key '{char}'")
-                    time.sleep(0.1)
-                
-                # Send Enter
-                lparam_down = (1 & 0xFFFF) | ((0x1C & 0xFF) << 16)
-                lparam_up = lparam_down | (1 << 30) | (1 << 31)
-                
-                self.debug_console.log(f"[WINAPI] Sending ENTER: VK=0x{VK_RETURN:02X}, HWND={hex(hwnd)}")
-                self.PostMessageW(hwnd, self.WM_KEYDOWN, VK_RETURN, lparam_down)
-                self.PostMessageW(hwnd, self.WM_KEYUP, VK_RETURN, lparam_up)
-                self.debug_console.log(f"[JSIDPLAY2] ✓ Sent ENTER after '{char}'")
-                time.sleep(0.1)
+            current_engine = getattr(self, 'audio_engine', 'sidplayfp')
+            self.debug_console.log(f"[STDIN] 📤 Sending sequence to ENGINE: {current_engine.upper()}")
             
-            self.debug_console.log(f"[WINAPI] ✓ Character sequence sent successfully")
+            # Log exactly what sequence will be sent
+            sequence_str = ' + Enter, '.join(char_list) + ' + Enter'
+            self.debug_console.log(f"[STDIN] 📝 Will send sequence: {sequence_str}")
+            self.debug_console.log(f"[STDIN] ⏱️  Timing: 100ms between each character (critical for JSidplay2)")
+            
+            # Send each character + Enter with proper timing
+            for char in char_list:
+                try:
+                    # Send character + newline together (fast sequence)
+                    self.process.stdin.write(char + '\n')
+                    self.process.stdin.flush()
+                    self.debug_console.log(f"[STDIN] ✓ Sent '{char}' + Enter")
+                    
+                    # Wait 100ms for JSidplay2 to process the command
+                    time.sleep(0.10)
+                    
+                except BrokenPipeError:
+                    self.debug_console.log(f"[STDIN] ✗ BrokenPipeError - process may have terminated")
+                    return False
+                except Exception as e:
+                    self.debug_console.log(f"[STDIN] ✗ Error sending '{char}': {e}")
+                    return False
+            
+            self.debug_console.log(f"[STDIN] ✓ Entire sequence sent successfully ({len(char_list)} characters)")
             return True
+            
         except Exception as e:
-            self.debug_console.log(f"[WINAPI] ✗ Error sending jsidplay2 sequence: {e}")
+            self.debug_console.log(f"[STDIN] ✗ Error in send_char_sequence_to_console: {e}")
             return False

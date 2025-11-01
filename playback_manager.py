@@ -29,6 +29,11 @@ class PlaybackManagerMixin:
     
     def prev_subtune(self):
         """Przełącz na poprzedni subtune"""
+        # Block if "default tune only" mode is enabled
+        if self.default_tune_only:
+            self.debug_console.log(f"[SUBTUNE] ◄ Blocked: 'Default tune only' mode is ON")
+            return
+        
         print(f"[SUBTUNE_DEBUG] prev_subtune() called: current={self.current_subtune}, max={self.num_subtunes}, is_playing={self.is_playing}")
         self.debug_console.log(f"[SUBTUNE] prev_subtune() called: current={self.current_subtune}, max={self.num_subtunes}")
         if self.current_subtune > 1:
@@ -51,11 +56,19 @@ class PlaybackManagerMixin:
 
             if self.is_playing:
                 if self.audio_engine == "jsidplay2":
-                    # jsidplay2 nie obsługuje arrow keys - trzeba zrestartować playback
-                    print(f"[SUBTUNE_DEBUG] Playing jsidplay2 - restarting with new subtune")
-                    self.debug_console.log(f"[SUBTUNE] jsidplay2 detected - restarting playback with new subtune")
-                    self.stop_sid_file()
-                    self.start_playing()
+                    # jsidplay2 obsługuje '<' dla prev subtune w trybie interaktywnym
+                    print(f"[SUBTUNE_DEBUG] Playing jsidplay2 - sending '<' for prev subtune")
+                    self.debug_console.log(f"[SUBTUNE] jsidplay2: Sending '<' for previous subtune")
+                    try:
+                        if self.process and self.process.stdin:
+                            self.process.stdin.write('<\n')
+                            self.process.stdin.flush()
+                            self.debug_console.log(f"[SUBTUNE] ◄ '<' sent to jsidplay2 successfully")
+                        else:
+                            self.debug_console.log(f"[SUBTUNE] ◄ Cannot send '<' - process not available")
+                    except Exception as e:
+                        print(f"[SUBTUNE_DEBUG] Error sending '<': {e}")
+                        self.debug_console.log(f"[SUBTUNE] ◄ Error sending '<': {e}")
                 else:
                     # Dla sidplayfp wyślij LEFT arrow za pomocą PostMessage
                     print(f"[SUBTUNE_DEBUG] Playing - sending LEFT arrow to sidplayfp")
@@ -75,6 +88,11 @@ class PlaybackManagerMixin:
 
     def next_subtune(self):
         """Przełącz na następny subtune"""
+        # Block if "default tune only" mode is enabled
+        if self.default_tune_only:
+            self.debug_console.log(f"[SUBTUNE] ► Blocked: 'Default tune only' mode is ON")
+            return
+        
         print(f"[SUBTUNE_DEBUG] next_subtune() called: current={self.current_subtune}, max={self.num_subtunes}, is_playing={self.is_playing}")
         self.debug_console.log(f"[SUBTUNE] next_subtune() called: current={self.current_subtune}, max={self.num_subtunes}")
         if self.current_subtune < self.num_subtunes:
@@ -97,11 +115,19 @@ class PlaybackManagerMixin:
 
             if self.is_playing:
                 if self.audio_engine == "jsidplay2":
-                    # jsidplay2 nie obsługuje arrow keys - trzeba zrestartować playback
-                    print(f"[SUBTUNE_DEBUG] Playing jsidplay2 - restarting with new subtune")
-                    self.debug_console.log(f"[SUBTUNE] jsidplay2 detected - restarting playback with new subtune")
-                    self.stop_sid_file()
-                    self.start_playing()
+                    # jsidplay2 obsługuje '>' dla next subtune w trybie interaktywnym
+                    print(f"[SUBTUNE_DEBUG] Playing jsidplay2 - sending '>' for next subtune")
+                    self.debug_console.log(f"[SUBTUNE] jsidplay2: Sending '>' for next subtune")
+                    try:
+                        if self.process and self.process.stdin:
+                            self.process.stdin.write('>\n')
+                            self.process.stdin.flush()
+                            self.debug_console.log(f"[SUBTUNE] ► '>' sent to jsidplay2 successfully")
+                        else:
+                            self.debug_console.log(f"[SUBTUNE] ► Cannot send '>' - process not available")
+                    except Exception as e:
+                        print(f"[SUBTUNE_DEBUG] Error sending '>': {e}")
+                        self.debug_console.log(f"[SUBTUNE] ► Error sending '>': {e}")
                 else:
                     # Dla sidplayfp wyślij RIGHT arrow za pomocą PostMessage
                     print(f"[SUBTUNE_DEBUG] Playing - sending RIGHT arrow to sidplayfp")
@@ -121,51 +147,63 @@ class PlaybackManagerMixin:
 
     def prev_song(self):
         """Przejdź do poprzedniej piosenki w playliście"""
+        # === MUTE CHANNELS BEFORE NAVIGATION (JSidplay2 only) ===
+        self.ensure_muted_before_navigation()
+        
         if (self.playlist_window is not None and
             hasattr(self.playlist_window, 'get_previous_song')):
             prev_entry = self.playlist_window.get_previous_song()
             if prev_entry:
-                self.debug_console.log(f"[PLAYLIST] Previous song: {prev_entry.title}")
+                self.debug_console.log(f"[PLAYLIST] ◄ Previous song: {prev_entry.title}")
                 self.play_song_from_playlist(prev_entry.file_path, prev_entry.duration)
             else:
-                self.debug_console.log("[PLAYLIST] No previous song available")
+                self.debug_console.log("[PLAYLIST] ◄ No previous song available (beginning of playlist)")
         elif self._check_playlist_available_from_file():
             # Playlist file exists but window not open - open it first (hidden for auto operations)
-            self.debug_console.log("[PLAYLIST] Opening playlist window for previous song")
+            self.debug_console.log("[PLAYLIST] ◄ Opening playlist window for previous song navigation")
             self.open_playlist(show_window=False)
             # After opening, try again
             if (self.playlist_window is not None and
                 hasattr(self.playlist_window, 'get_previous_song')):
                 prev_entry = self.playlist_window.get_previous_song()
                 if prev_entry:
-                    self.debug_console.log(f"[PLAYLIST] Previous song: {prev_entry.title}")
+                    self.debug_console.log(f"[PLAYLIST] ◄ Previous song (auto-loaded): {prev_entry.title}")
                     self.play_song_from_playlist(prev_entry.file_path, prev_entry.duration)
                 else:
-                    self.debug_console.log("[PLAYLIST] No previous song available")
+                    self.debug_console.log("[PLAYLIST] ◄ No previous song available (beginning of playlist)")
+        else:
+            # No playlist available
+            self.debug_console.log("[PLAYLIST] ◄ No playlist available (file not found or has <2 entries)")
 
     def next_song(self):
         """Przejdź do następnej piosenki w playliście"""
+        # === MUTE CHANNELS BEFORE NAVIGATION (JSidplay2 only) ===
+        self.ensure_muted_before_navigation()
+        
         if (self.playlist_window is not None and
             hasattr(self.playlist_window, 'get_next_song')):
             next_entry = self.playlist_window.get_next_song()
             if next_entry:
-                self.debug_console.log(f"[PLAYLIST] Next song: {next_entry.title}")
+                self.debug_console.log(f"[PLAYLIST] ► Next song: {next_entry.title}")
                 self.play_song_from_playlist(next_entry.file_path, next_entry.duration)
             else:
-                self.debug_console.log("[PLAYLIST] No next song available")
+                self.debug_console.log("[PLAYLIST] ► No next song available (end of playlist)")
         elif self._check_playlist_available_from_file():
             # Playlist file exists but window not open - open it first (hidden for auto operations)
-            self.debug_console.log("[PLAYLIST] Opening playlist window for next song")
+            self.debug_console.log("[PLAYLIST] ► Opening playlist window for next song navigation")
             self.open_playlist(show_window=False)
             # After opening, try again
             if (self.playlist_window is not None and
                 hasattr(self.playlist_window, 'get_next_song')):
                 next_entry = self.playlist_window.get_next_song()
                 if next_entry:
-                    self.debug_console.log(f"[PLAYLIST] Next song: {next_entry.title}")
+                    self.debug_console.log(f"[PLAYLIST] ► Next song (auto-loaded): {next_entry.title}")
                     self.play_song_from_playlist(next_entry.file_path, next_entry.duration)
                 else:
-                    self.debug_console.log("[PLAYLIST] No next song available")
+                    self.debug_console.log("[PLAYLIST] ► No next song available (end of playlist)")
+        else:
+            # No playlist available
+            self.debug_console.log("[PLAYLIST] ► No playlist available (file not found or has <2 entries)")
 
     def start_playing(self):
         """Start playback of the selected SID file with chosen audio engine and subtune"""
@@ -176,8 +214,16 @@ class PlaybackManagerMixin:
         # Jeśli metadane nie są jeszcze wczytane (załadowany z settings), wczytaj je teraz
         if self.title_label.text() in ["DROP A SID FILE", "UNKNOWN TITLE"]:
             self.read_metadata(self.sid_file)
-            self.current_song_duration = self.get_song_duration(self.sid_file)
+            self.current_song_duration = self.get_song_duration(self.sid_file, self.current_subtune)
             self.total_duration = self.current_song_duration
+            self.update_time_label()
+        
+        # WAŻNE: Jeśli total_duration == 0 (został zresetowany w stop_sid_file, np. podczas auto-advance),
+        # pobierz go ponownie dla aktualnego subtune
+        if self.total_duration == 0 and self.sid_file:
+            self.total_duration = self.get_song_duration(self.sid_file, self.current_subtune)
+            self.current_song_duration = self.total_duration
+            self.debug_console.log(f"[START] Duration restored after stop for subtune {self.current_subtune}: {self.total_duration}s")
             self.update_time_label()
 
         if self.process:
@@ -195,6 +241,7 @@ class PlaybackManagerMixin:
         self.is_playing = True
         self.playback_speed_multiplier = 1  # Reset speed to 1x
         self.arrow_key_net_count = 0  # Reset arrow key count
+        # === WAŻNE: NIE resetuj flagi - czekaj na faktyczne wyciszenie kanałów ===
         self.debug_console.log("[START] start_playing() called")  # LOG STARTOWANIA
         self.update_status_label()  # Update status with proper styling
         self.update_button_style()  # Update button to default style
@@ -231,20 +278,18 @@ class PlaybackManagerMixin:
         # Buduj komendę w zależności od wybranego engine'a
         if self.audio_engine == "jsidplay2":
             # jsidplay2-console wymaga parametrów w tej kolejności:
-            # jsidplay2-console.exe --engine USBSID --usbSidAudio 1 [--tune N] file.sid
-            # Note: --tune parameter may or may not be supported, depending on jsidplay2 version
+            # jsidplay2-console.exe --engine USBSID --usbSidAudio 1 file.sid
+            # Note: Subtune navigation uses interactive commands '<' and '>' sent to stdin
             command = [engine_executable]
             command.append("--engine")
             command.append("USBSID")
             command.append("--usbSidAudio")
             command.append("1")
-            # Spróbuj dodać parametr --tune jeśli jest dostępny
-            # (some versions of jsidplay2 support it, others don't)
-            if self.current_subtune > 1:
-                command.append("--tune")
-                command.append(str(self.current_subtune))
             command.append(sid_path)
             self.debug_console.log(f"[INFO] jsidplay2: Playing with USBSID engine, subtune {self.current_subtune}/{self.num_subtunes}")
+            
+            # Jeśli to nie pierwsze odtwarzanie, wyślij komendy '<' aby dostać się na właściwy subtune
+            # (this will be handled after process starts via interactive commands)
         else:
             # sidplayfp wymaga formatu: sidplayfp.exe -s<subtune> [-ol | -t<time>] file.sid
             command = [engine_executable]
@@ -298,13 +343,19 @@ class PlaybackManagerMixin:
             self.debug_console.log(f"[INFO] ✓ Process created: PID={self.process.pid}, engine={self.audio_engine}")
             self.debug_console.log(f"[INFO] ⏳ Waiting for {self.audio_engine} to start playback...")
             
-            # Uruchom thread do ukrycia konsoli (zaraz po starcie)
-            hide_thread = threading.Thread(target=self.hide_console_window_for_sidplay, daemon=True)
-            hide_thread.start()
+            # Uruchom thread do ukrycia konsoli TYLKO dla sidplayfp (zaraz po starcie)
+            # Dla jsidplay2 konsola nie pojawia się lub jest już ukryta
+            if self.audio_engine == "sidplayfp":
+                hide_thread = threading.Thread(target=self.hide_console_window_for_sidplay, daemon=True)
+                hide_thread.start()
             
             # Uruchom thread do monitorowania startu playbacku
             monitor_thread = threading.Thread(target=self.monitor_playback_start, daemon=True)
             monitor_thread.start()
+            
+            # === NOWY PROCES STARTUJE NORMALNIE I GRA - BEZ SZTUCZNYCH MUTE ===
+            # Mute był już wykonany w next_song/prev_song na STARYM procesie
+            # Nowy proces startuje z DEFAULT state i gra od razu
             
         except FileNotFoundError:
             engine_name = self.audio_engine if self.audio_engine in self.available_engines else "unknown"
@@ -329,33 +380,64 @@ class PlaybackManagerMixin:
                     # Timer jest aktywny = muzykę odtwarzana, wciśnięto PAUSE → zatrzymaj
                     self.timer.stop()
                     self.debug_console.log("[PAUSE] ⏸ jsidplay2: Timer stopped (PAUSED)")
+                    
+                    # PAUSE #1: Wysyłaj MUTE sequence NAJPIERW (gdy jeszcze mogą się wyciszyć)
+                    self.mute_all_jsidplay2_channels()
+                    
+                    # PAUSE #2: Dopiero potem wysłij 'p' (wstrzymaj granie)
+                    pause_success = False
+                    
+                    # LEVEL 1: Spróbuj wysłać 'p' przez STDIN (najskuteczniejsze!)
+                    if self.process and self.process.stdin:
+                        try:
+                            self.debug_console.log("[PAUSE] 📋 Level 1: Attempting stdin input for PAUSE...")
+                            self.process.stdin.write("p\n")
+                            self.process.stdin.flush()
+                            self.debug_console.log("[PAUSE] ✓ 'p' command sent via stdin to jsidplay2")
+                            pause_success = True
+                        except Exception as e:
+                            self.debug_console.log(f"[PAUSE] ✗ stdin write failed: {e}")
+                    
+                    # LEVEL 2: Jeśli stdin nie zadziałał, spróbuj PostMessage API
+                    if not pause_success:
+                        self.debug_console.log("[PAUSE] 📋 Level 2: Attempting PostMessage API for PAUSE...")
+                        success = self.send_char_sequence_to_console(['p'])
+                        
+                        if success:
+                            self.debug_console.log("[PAUSE] ✓ 'p' key sent via PostMessage to jsidplay2")
+                        else:
+                            self.debug_console.log("[PAUSE] ✗ PostMessage failed - window not found")
                 else:
                     # Timer jest nieaktywny = muzykę na pauzie, wciśnięto PAUSE → wznów
                     self.timer.start(1000)  # Wznów licznik
                     self.debug_console.log("[PAUSE] ▶ jsidplay2: Timer started (RESUMED)")
-                
-                pause_success = False
-                
-                # LEVEL 1: Spróbuj wysłać 'p' przez STDIN (najskuteczniejsze!)
-                if self.process and self.process.stdin:
-                    try:
-                        self.debug_console.log("[PAUSE] 📋 Level 1: Attempting stdin input...")
-                        self.process.stdin.write("p\n")
-                        self.process.stdin.flush()
-                        self.debug_console.log("[PAUSE] ✓ 'p' command sent via stdin to jsidplay2")
-                        pause_success = True
-                    except Exception as e:
-                        self.debug_console.log(f"[PAUSE] ✗ stdin write failed: {e}")
-                
-                # LEVEL 2: Jeśli stdin nie zadziałał, spróbuj PostMessage API
-                if not pause_success:
-                    self.debug_console.log("[PAUSE] 📋 Level 2: Attempting PostMessage API...")
-                    success = self.send_char_sequence_to_console(['p'])
                     
-                    if success:
-                        self.debug_console.log("[PAUSE] ✓ 'p' key sent via PostMessage to jsidplay2")
-                    else:
-                        self.debug_console.log("[PAUSE] ✗ PostMessage failed - window not found")
+                    # RESUME #1: Wysyłaj 'p' NAJPIERW (wznów granie)
+                    pause_success = False
+                    
+                    # LEVEL 1: Spróbuj wysłać 'p' przez STDIN (najskuteczniejsze!)
+                    if self.process and self.process.stdin:
+                        try:
+                            self.debug_console.log("[PAUSE] 📋 Level 1: Attempting stdin input for RESUME...")
+                            self.process.stdin.write("p\n")
+                            self.process.stdin.flush()
+                            self.debug_console.log("[PAUSE] ✓ 'p' command sent via stdin to jsidplay2 (RESUME)")
+                            pause_success = True
+                        except Exception as e:
+                            self.debug_console.log(f"[PAUSE] ✗ stdin write failed: {e}")
+                    
+                    # LEVEL 2: Jeśli stdin nie zadziałał, spróbuj PostMessage API
+                    if not pause_success:
+                        self.debug_console.log("[PAUSE] 📋 Level 2: Attempting PostMessage API for RESUME...")
+                        success = self.send_char_sequence_to_console(['p'])
+                        
+                        if success:
+                            self.debug_console.log("[PAUSE] ✓ 'p' key sent via PostMessage to jsidplay2 (RESUME)")
+                        else:
+                            self.debug_console.log("[PAUSE] ✗ PostMessage failed - window not found")
+                    
+                    # RESUME #2: Dopiero potem wysyłaj UNMUTE sequence
+                    self.unmute_all_jsidplay2_channels()
             else:
                 # Dla sidplayfp: zarządzaj timerem i wysyłaj 'p' poprzez key simulation
                 if self.timer.isActive():
@@ -383,6 +465,8 @@ class PlaybackManagerMixin:
     
     def stop_sid_file(self):
         """Zatrzymaj playback - dla jsidplay2 wyślij 'q', dla sidplayfp używaj terminate"""
+        # === MUTE JEST ROBIONY JUŻ W next_song/prev_song - NIE POWTARZAMY TUTAJ ===
+        
         if self.process:
             try:
                 # Dla jsidplay2, spróbuj graceful shutdown przez wysłanie 'q'
@@ -482,6 +566,7 @@ class PlaybackManagerMixin:
         self.playback_speed_multiplier = 1  # Resetuj mnożnik prędkości
         self.arrow_key_net_count = 0  # Resetuj licznik arrow keys
         self.is_seeking = False  # Resetuj flagę seek'u
+        self.jsidplay2_channels_muted = False  # Reset JSidplay2 mute state on stop
         self.update_status_label()  # Update status with proper styling
         self.update_button_style()  # Reset button to default style
         self.update_time_label()
@@ -489,41 +574,10 @@ class PlaybackManagerMixin:
         self.progress_bar.setValue(0)
 
     def update_time(self):
-        """Update time display - sidplayfp zarządza końcem odtwarzania."""
-        # Inkrementuj czas uwzględniając aktualną prędkość
-        self.time_elapsed += self.playback_speed_multiplier
-        self.update_time_label()
-        
-        # Aktualizuj pasek postępu
-        if self.total_duration > 0:
-            progress = int((self.time_elapsed / self.total_duration) * 100)
-            if progress > 100:
-                progress = progress % 100
-            self.progress_bar.setValue(progress)
-            
-            # Sprawdź czy muzyka się skończyła
-            if self.time_elapsed >= self.total_duration:
-                if self.loop_enabled:
-                    # Loop jest włączony - resetuj licznik ale nie stop
-                    self.time_elapsed = 0
-                    self.progress_bar.setValue(0)
-                    self.update_time_label()
-                    self.debug_console.log(f"[LOOP] ✓ Song ended, looping... (resetting timer)")
-                else:
-                    # Loop jest wyłączony - sprawdź czy jest następna piosenka w playliście
-                    if self._check_playlist_available_from_file():
-                        self.debug_console.log(f"[PLAYBACK] ✓ Song ended, auto-advancing to next song")
-                        self.next_song()
-                    else:
-                        # Brak playlisty - zatrzymaj muzykę
-                        self.debug_console.log(f"[PLAYBACK] ✓ Song ended, stopping playback")
-                        self.timer.stop()
-                        self.stop_sid_file()  # Wyślij sygnał STOP
-    
-    def update_time(self):
         """Callback wywołany co sekundę przez timer - aktualizuje czas i progress"""
         if self.is_playing:
-            self.time_elapsed += 1
+            # Dodaj czas uwzględniając mnożnik prędkości (1x lub 8x)
+            self.time_elapsed += self.playback_speed_multiplier
             
             # Aktualizuj label czasowy
             self.update_time_label()
@@ -544,9 +598,35 @@ class PlaybackManagerMixin:
                     self.update_time_label()
                     self.debug_console.log(f"[LOOP] ✓ Song ended, looping... (resetting timer)")
                 else:
-                    # Loop jest wyłączony - sprawdź czy jest następna piosenka w playliście
-                    if self._check_playlist_available_from_file():
+                    # Loop jest wyłączony
+                    # Sprawdzenie czy default_tune_only jest OFF i czy są dodatkowe subtunes
+                    if not self.default_tune_only and self.current_subtune < self.num_subtunes:
+                        # === AUTO-PLAY NEXT SUBTUNE ===
+                        self.current_subtune += 1
                         self.timer.stop()
+                        # === RESET TIME AND PROGRESS BAR ===
+                        self.time_elapsed = 0
+                        self.progress_bar.setValue(0)
+                        self.debug_console.log(f"[SUBTUNE-AUTO] ► Auto-advancing to subtune {self.current_subtune}/{self.num_subtunes}")
+                        
+                        # Update duration for new subtune from Songlengths database
+                        if self.sid_file:
+                            self.total_duration = self.get_song_duration(self.sid_file, self.current_subtune)
+                            self.current_song_duration = self.total_duration
+                            self.debug_console.log(f"[SUBTUNE] Duration updated for subtune {self.current_subtune}: {self.total_duration}s")
+                        
+                        # === NOW UPDATE THE LABEL WITH NEW DURATION ===
+                        self.update_time_label()
+                        self.update_ui_state()
+                        # Restart playback with new subtune
+                        self.stop_sid_file()
+                        self.start_playing()
+                    elif self._check_playlist_available_from_file():
+                        # === MOVE TO NEXT SONG (from playlist or sequential) ===
+                        self.timer.stop()
+                        # Reset subtune to default when moving to next song
+                        self.current_subtune = self.default_subtune
+                        self.debug_console.log(f"[AUTOPLAY] ► Moving to next song (subtune {self.current_subtune})")
                         self.next_song()
                     else:
                         # Brak playlisty - zatrzymaj muzykę
@@ -650,6 +730,22 @@ class PlaybackManagerMixin:
                             playback_detected = True
                             msg = f"[INFO] ✓ Playback detected ({self.audio_engine})! Starting timer immediately..."
                             self.debug_console.log(msg)
+                            
+                            # === JSidplay2: Send subtune commands if needed ===
+                            if is_jsidplay2 and self.current_subtune > 1:
+                                try:
+                                    # Send '>' commands to navigate to the right subtune
+                                    steps = self.current_subtune - 1
+                                    self.debug_console.log(f"[INFO] JSidplay2: Sending {steps} '>' commands to reach subtune {self.current_subtune}")
+                                    for i in range(steps):
+                                        if self.process and self.process.stdin:
+                                            self.process.stdin.write('>\n')
+                                            self.process.stdin.flush()
+                                            time.sleep(0.05)  # Small delay between commands
+                                    self.debug_console.log(f"[INFO] ✓ Subtune navigation complete: now at subtune {self.current_subtune}")
+                                except Exception as e:
+                                    self.debug_console.log(f"[WARN] Error sending subtune commands to jsidplay2: {e}")
+                            
                             # Emit signal - timer będzie startowany z main thread
                             self.playback_started_signal.emit(0)
                             self.debug_console.log("[MONITOR] Signal emitted! Continuing to monitor...")
@@ -664,3 +760,202 @@ class PlaybackManagerMixin:
             self.debug_console.log(msg)
         finally:
             self.debug_console.log("[MONITOR] monitor_playback_start() thread FINISHED")
+    
+    # ===============================================
+    #    JSIDPLAY2 CHANNEL MUTE MANAGEMENT
+    # ===============================================
+    
+    def get_jsidplay2_mute_sequence(self):
+        """
+        Get the character sequence for muting/unmuting all JSidplay2 channels.
+        
+        JSidplay2 can control 8 primary channels via numeric keys.
+        Mutes channels 1-8 which covers all needed audio channels.
+        
+        Each key press TOGGLES the mute state for that channel.
+        
+        Returns:
+            list: ['1', '2', '3', '4', '5', '6', '7', '8']
+        """
+        return ['1', '2', '3', '4', '5', '6', '7', '8']
+    
+    def mute_all_jsidplay2_channels(self, force=False):
+        """
+        Mute all 8 primary channels in JSidplay2 (SYNCHRONOUSLY to ensure proper ordering).
+        
+        Sends mute sequence (1-8) to the jsidplay2 console window.
+        Updates tracking flag: self.jsidplay2_channels_muted = True
+        
+        Only executes for JSidplay2 engine. For sidplayfp, returns False.
+        
+        Args:
+            force: If True, mute even if flag says already muted (needed for new process startup)
+        
+        Returns:
+            bool: True if mute sequence sent successfully, False otherwise
+        """
+        # Only for JSidplay2
+        if self.audio_engine != "jsidplay2":
+            return False
+        
+        # Already muted - skip redundant operation (unless force=True for new process)
+        if self.jsidplay2_channels_muted and not force:
+            self.debug_console.log("[MUTE] ℹ️  Channels already muted, skipping")
+            return True
+        
+        try:
+            mute_seq = self.get_jsidplay2_mute_sequence()
+            self.debug_console.log(f"[MUTE] 🔇 Muting all JSidplay2 channels: {', '.join(mute_seq)}")
+            
+            # Send SYNCHRONOUSLY - critical for proper command sequencing with PAUSE
+            success = self.send_char_sequence_to_console(mute_seq)
+            if success:
+                self.jsidplay2_channels_muted = True
+                self.debug_console.log(f"[MUTE] ✓ All channels muted successfully")
+            else:
+                self.debug_console.log(f"[MUTE] ✗ Failed to mute channels (send_char_sequence failed)")
+            
+            return success
+        except Exception as e:
+            self.debug_console.log(f"[MUTE] ✗ Error during mute operation: {e}")
+            return False
+    
+    def unmute_all_jsidplay2_channels(self):
+        """
+        Unmute all 8 primary channels in JSidplay2 (SYNCHRONOUSLY to ensure proper ordering).
+        
+        Sends unmute sequence (same as mute - acts as TOGGLE) to the jsidplay2 console.
+        Updates tracking flag: self.jsidplay2_channels_muted = False
+        
+        Only executes for JSidplay2 engine. For sidplayfp, returns False.
+        
+        Returns:
+            bool: True if unmute sequence sent successfully, False otherwise
+        """
+        # Only for JSidplay2
+        if self.audio_engine != "jsidplay2":
+            return False
+        
+        # Already unmuted - skip redundant operation
+        if not self.jsidplay2_channels_muted:
+            self.debug_console.log("[MUTE] ℹ️  Channels already unmuted, skipping")
+            return True
+        
+        try:
+            unmute_seq = self.get_jsidplay2_mute_sequence()  # Same sequence acts as TOGGLE
+            self.debug_console.log(f"[MUTE] 🔊 Unmuting all JSidplay2 channels: {', '.join(unmute_seq)}")
+            
+            # Send SYNCHRONOUSLY - critical for proper command sequencing with PAUSE
+            success = self.send_char_sequence_to_console(unmute_seq)
+            if success:
+                self.jsidplay2_channels_muted = False
+                self.debug_console.log(f"[MUTE] ✓ All channels unmuted successfully")
+            else:
+                self.debug_console.log(f"[MUTE] ✗ Failed to unmute channels (send_char_sequence failed)")
+            
+            return success
+        except Exception as e:
+            self.debug_console.log(f"[MUTE] ✗ Error during unmute operation: {e}")
+            return False
+    
+    def ensure_muted_before_navigation(self):
+        """
+        Ensure all JSidplay2 channels are muted before navigation operations.
+        
+        Called before STOP, NEXT SONG, PREV SONG to prevent audio glitches.
+        Runs SYNCHRONOUSLY to prevent command sequencing conflicts with other mute operations.
+        Always mutes, regardless of current mute state.
+        
+        Only executes for JSidplay2 engine.
+        
+        Returns:
+            bool: True if mute successful, False otherwise
+        """
+        if self.audio_engine != "jsidplay2":
+            return True
+        
+        try:
+            mute_seq = self.get_jsidplay2_mute_sequence()
+            self.debug_console.log(f"[MUTE] 🔇 Pre-navigation mute: ensuring all channels are muted before navigation")
+            
+            # Send SYNCHRONOUSLY to prevent command sequencing conflicts
+            success = self.send_char_sequence_to_console(mute_seq)
+            
+            if success:
+                self.jsidplay2_channels_muted = True
+                self.debug_console.log(f"[MUTE] ✓ Pre-navigation mute successful")
+            else:
+                self.debug_console.log(f"[MUTE] ⚠️  Pre-navigation mute failed (window not found)")
+            
+            return success
+        except Exception as e:
+            self.debug_console.log(f"[MUTE] ⚠️  Error during pre-navigation mute: {e}")
+            return False
+    
+    def reset_mute_state_on_new_playback(self):
+        """
+        Reset mute state when starting new playback.
+        
+        Called from start_playing() to reset mute tracking for new song.
+        Assumes new playback starts with unmuted channels (no action taken).
+        
+        Only affects JSidplay2 - no-op for sidplayfp.
+        """
+        if self.audio_engine == "jsidplay2":
+            self.jsidplay2_channels_muted = False
+            self.debug_console.log(f"[MUTE] 🔄 Mute state reset for new playback")
+    
+    def graceful_shutdown_jsidplay2(self):
+        """
+        Graceful shutdown of JSidplay2 using the USB SID Pico menu sequence.
+        
+        Sends the menu sequence: 1, 2, 3, q - to properly silence USB SID Pico hardware
+        before closing the process. This ensures no audio artifacts remain on the device.
+        
+        Called from cleanup_on_exit() - sends directly to running process.
+        Only executes for JSidplay2 engine.
+        
+        Returns:
+            bool: True if shutdown sequence executed successfully, False otherwise
+        """
+        if self.audio_engine != "jsidplay2":
+            print("[EXIT] ⚠️  Engine is not jsidplay2, skipping graceful shutdown")
+            return False
+        
+        if not self.process:
+            print(f"[EXIT] ⚠️  Cannot shutdown - no process available (self.process={self.process})")
+            return False
+        
+        if self.process.poll() is not None:
+            print(f"[EXIT] ⚠️  Process already terminated (returncode={self.process.returncode})")
+            return False
+        
+        if not self.process.stdin:
+            print("[EXIT] ⚠️  Cannot shutdown - stdin not available")
+            return False
+        
+        try:
+            # Send menu sequence: 1, 2, 3 (USB SID Pico options), then quit
+            shutdown_sequence = ["1", "2", "3", "q"]
+            print(f"[EXIT] 🔇 Sending shutdown sequence to JSidplay2 PID={self.process.pid}: {' → '.join(shutdown_sequence)}")
+            
+            for cmd in shutdown_sequence:
+                try:
+                    print(f"[EXIT] Sending '{cmd}' to process...")
+                    self.process.stdin.write(f"{cmd}\n")
+                    self.process.stdin.flush()
+                    print(f"[EXIT] ✓ Sent '{cmd}' to JSidplay2")
+                    time.sleep(0.2)  # Wait for command processing
+                except Exception as e:
+                    print(f"[EXIT] ✗ Error sending '{cmd}': {e}")
+                    import traceback
+                    print(f"[EXIT] Traceback: {traceback.format_exc()}")
+                    return False
+            
+            print("[EXIT] ✓ Graceful shutdown sequence complete")
+            return True
+        except Exception as e:
+            print(f"[EXIT] ✗ Error during graceful shutdown: {e}")
+            import traceback
+            print(f"[EXIT] Traceback: {traceback.format_exc()}")
+            return False

@@ -15,8 +15,10 @@ class DebugConsoleWidget(QWidget):
     # Signal emitted when text needs to be added to console
     append_text = pyqtSignal(str)
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Set as Tool window type to prevent closing parent when this window is closed
+        self.setWindowFlags(self.windowFlags() | Qt.Tool)
         self.init_ui()
         self.append_text.connect(self.add_text)  # Connect signal to slot
         

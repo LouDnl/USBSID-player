@@ -87,19 +87,24 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         self.num_subtunes = 1
         self.current_subtune = 1
         self.default_subtune = 1
+        self.default_tune_only = False  # Jeśli True, ignoruj subtunes i graj zawsze default
         
         # --- DEBUG CONSOLE ---
-        self.debug_console = DebugConsoleWidget()
+        self.debug_console = DebugConsoleWidget(parent=self)
         
         # --- THEME SETTINGS ---
         self.theme_settings = {
             'hue': 210,
             'saturation': 50,
             'brightness': 50,
-            'temperature': 50
+            'contrast': 256,
+            'temperature': 256
         }
         self.theme_window = None  # Referencja do okna theme settings
         self.playlist_window = None  # Referencja do okna playlisty
+        
+        # --- EXIT CLEANUP ---
+        self._cleanup_done = False  # Flaga aby cleanup_on_exit był idempotentny
         
         # --- PLAYLIST MANAGEMENT ---
         self.playlist_file_path = None  # Ścieżka do pliku playlisty
@@ -109,6 +114,9 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
             'author': 'ascending',
             'year': 'ascending'
         }
+        
+        # --- JSIDPLAY2 CHANNEL MUTE STATE ---
+        self.jsidplay2_channels_muted = False  # Tracks mute state for PAUSE toggle (False = unmuted, True = muted)
 
         # --- ŚCIEŻKA DO sidplayfp.exe ---
         if hasattr(sys, 'frozen'):
@@ -170,6 +178,13 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
 
         # --- UI ---
         self.init_ui()
+        
+        # --- WINDOW ICON ---
+        icon_path = os.path.join(self.base_dir, "assets", "sid_ico.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        self.setWindowTitle("SID Player")
+        
         self.apply_modern_theme()
         
         # Initialize status and button styling
@@ -241,6 +256,12 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
                 self.loop_checkbox.setChecked(loop_state)
                 self.loop_enabled = loop_state
                 print(f"[INFO] Załadowano stan Loop: {loop_state}")
+                
+                default_tune_str = settings['playback'].get('default_tune_only', 'False')
+                default_tune_state = default_tune_str.lower() in ['true', '1', 'yes']
+                self.default_tune_only_checkbox.setChecked(default_tune_state)
+                self.default_tune_only = default_tune_state
+                print(f"[INFO] Załadowano stan Default Tune Only: {default_tune_state}")
             
             # Load playlist sort settings
             if 'playlist_sort' in settings and settings['playlist_sort']:
@@ -264,7 +285,8 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
                 'theme': self.theme_settings.copy(),
                 'playback': {
                     'loop_enabled': str(self.loop_enabled),
-                    'audio_engine': str(self.audio_engine)
+                    'audio_engine': str(self.audio_engine),
+                    'default_tune_only': str(self.default_tune_only)
                 },
                 'playlist_sort': self.playlist_sort_state.copy()
             }
@@ -399,69 +421,89 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
 
     def keyPressEvent(self, event):
         """Obsługa skrótów klawiszowych - CTRL+X pokazuje/ukrywa konsolę, CTRL+L otwiera/zamyka playlistę"""
-        import sys
-        print(f"[KEY_DEBUG] keyPressEvent CALLED: key={event.key()}, text='{event.text()}', modifiers={event.modifiers()}", file=sys.stderr, flush=True)
-        sys.stdout.flush()
-        if event.key() == Qt.Key_X and event.modifiers() == Qt.ControlModifier:
-            self.toggle_console_visibility()
-        elif event.key() == Qt.Key_L and event.modifiers() == Qt.ControlModifier:
-            # Toggle playlist button (which will trigger toggle_playlist_visibility via toggled signal)
-            self.playlist_button.setChecked(not self.playlist_button.isChecked())
-        elif event.key() == Qt.Key_P and event.modifiers() == Qt.NoModifier:
-            # P: Toggle pause/play
-            if self.is_playing:
-                self.pause_playing()
-                self.debug_console.log("[HOTKEY] P: Pause/Play toggled")
-            elif self.sid_file:
-                self.start_playing()
-                self.debug_console.log("[HOTKEY] P: Playing started")
-        elif event.key() == Qt.Key_B:
-            # B: Next song
-            self.next_song()
-            self.debug_console.log("[HOTKEY] B: Next song")
-        elif event.key() == Qt.Key_V:
-            # V: Previous song
-            self.prev_song()
-            self.debug_console.log("[HOTKEY] V: Previous song")
-        elif event.key() == Qt.Key_L and event.modifiers() == Qt.NoModifier:
-            # L: Loop on/off
-            self.loop_enabled = not self.loop_enabled
-            if self.loop_enabled:
-                self.loop_checkbox.setText("Loop Song ✓")
+        try:
+            if event.key() == Qt.Key_X and event.modifiers() == Qt.ControlModifier:
+                self.toggle_console_visibility()
+                return  # Important: prevent event propagation
+            elif event.key() == Qt.Key_L and event.modifiers() == Qt.ControlModifier:
+                # Toggle playlist button (which will trigger toggle_playlist_visibility via toggled signal)
+                self.playlist_button.setChecked(not self.playlist_button.isChecked())
+            elif event.key() == Qt.Key_P and event.modifiers() == Qt.NoModifier:
+                # P: Toggle pause/play
+                if self.is_playing:
+                    self.pause_playing()
+                    self.debug_console.log("[HOTKEY] P: Pause/Play toggled")
+                elif self.sid_file:
+                    self.start_playing()
+                    self.debug_console.log("[HOTKEY] P: Playing started")
+            elif event.key() == Qt.Key_B:
+                # B: Next song
+                self.next_song()
+                self.debug_console.log("[HOTKEY] B: Next song")
+            elif event.key() == Qt.Key_V:
+                # V: Previous song
+                self.prev_song()
+                self.debug_console.log("[HOTKEY] V: Previous song")
+            elif event.key() == Qt.Key_L and event.modifiers() == Qt.NoModifier:
+                # L: Loop on/off
+                self.loop_enabled = not self.loop_enabled
+                if self.loop_enabled:
+                    self.loop_checkbox.setText("Loop Song ✓")
+                else:
+                    self.loop_checkbox.setText("Loop Song")
+                # Restart playback if currently playing to apply loop setting
+                if self.is_playing:
+                    self.stop_sid_file()
+                    self.start_playing()
+                self.debug_console.log(f"[HOTKEY] L: Loop toggled - {self.loop_enabled}")
+            elif event.key() == Qt.Key_Up:
+                print(f"[KEY_DEBUG] UP ARROW detected")
+                self.send_input_to_sidplay("\x1bOA")  # VT100 format
+            elif event.key() == Qt.Key_Down:
+                print(f"[KEY_DEBUG] DOWN ARROW detected")
+                self.send_input_to_sidplay("\x1bOB")  # VT100 format
+            elif event.key() == Qt.Key_Left:
+                # Previous subtune - zmniejsz numer i wyślij strzałkę
+                print(f"[KEY_DEBUG] LEFT ARROW DETECTED: is_playing={self.is_playing}, current_subtune={self.current_subtune}")
+                self.debug_console.log("[KEY] LEFT ARROW pressed")
+                self.prev_subtune()  # Already sends escape sequence internally if is_playing
+            elif event.key() == Qt.Key_Right:
+                # Next subtune - zwiększ numer i wyślij strzałkę
+                print(f"[KEY_DEBUG] RIGHT ARROW DETECTED: is_playing={self.is_playing}, current_subtune={self.current_subtune}")
+                self.debug_console.log("[KEY] RIGHT ARROW pressed")
+                self.next_subtune()  # Already sends escape sequence internally if is_playing
             else:
-                self.loop_checkbox.setText("Loop Song")
-            # Restart playback if currently playing to apply loop setting
-            if self.is_playing:
-                self.stop_sid_file()
-                self.start_playing()
-            self.debug_console.log(f"[HOTKEY] L: Loop toggled - {self.loop_enabled}")
-        elif event.key() == Qt.Key_Up:
-            print(f"[KEY_DEBUG] UP ARROW detected")
-            self.send_input_to_sidplay("\x1bOA")  # VT100 format
-        elif event.key() == Qt.Key_Down:
-            print(f"[KEY_DEBUG] DOWN ARROW detected")
-            self.send_input_to_sidplay("\x1bOB")  # VT100 format
-        elif event.key() == Qt.Key_Left:
-            # Previous subtune - zmniejsz numer i wyślij strzałkę
-            print(f"[KEY_DEBUG] LEFT ARROW DETECTED: is_playing={self.is_playing}, current_subtune={self.current_subtune}")
-            self.debug_console.log("[KEY] LEFT ARROW pressed")
-            self.prev_subtune()  # Already sends escape sequence internally if is_playing
-        elif event.key() == Qt.Key_Right:
-            # Next subtune - zwiększ numer i wyślij strzałkę
-            print(f"[KEY_DEBUG] RIGHT ARROW DETECTED: is_playing={self.is_playing}, current_subtune={self.current_subtune}")
-            self.debug_console.log("[KEY] RIGHT ARROW pressed")
-            self.next_subtune()  # Already sends escape sequence internally if is_playing
-        else:
-            super().keyPressEvent(event)
+                super().keyPressEvent(event)
+        except Exception as e:
+            # Log exception to error file and prevent app crash
+            error_message = f"[ERROR] keyPressEvent exception: {type(e).__name__}: {str(e)}"
+            print(error_message)
+            self._log_error_to_file(error_message)
 
     def toggle_console_visibility(self):
-        """Przełącz widoczność debug consoli"""
-        if self.debug_console.isVisible():
-            self.debug_console.hide()
-            print("[INFO] Debug console: HIDDEN (CTRL+X)")
-        else:
-            self.debug_console.show()
-            print("[INFO] Debug console: VISIBLE (CTRL+X)")
+        """Przełącz widoczność debug consoli - z obsługą wyjątków"""
+        try:
+            if self.debug_console.isVisible():
+                self.debug_console.hide()
+                print("[INFO] Debug console: HIDDEN (CTRL+X)")
+            else:
+                self.debug_console.show()
+                print("[INFO] Debug console: VISIBLE (CTRL+X)")
+        except Exception as e:
+            # Log exception to error file and console
+            error_message = f"[ERROR] toggle_console_visibility exception: {type(e).__name__}: {str(e)}"
+            print(error_message, file=sys.stderr)
+            self._log_error_to_file(error_message)
+    
+    def _log_error_to_file(self, error_message):
+        """Zaloguj błąd do pliku sidplayer_error.txt"""
+        try:
+            error_file_path = os.path.join(self.base_dir, "sidplayer_error.txt")
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open(error_file_path, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {error_message}\n")
+        except Exception as log_error:
+            print(f"[CRITICAL] Failed to log error: {log_error}", file=sys.stderr)
 
     def send_input_to_sidplay(self, data):
         try:
@@ -492,36 +534,6 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
 
     # UI methods (apply_modern_theme, init_ui) are now in UIThemeMixin
     # They are automatically available through inheritance
-        
-        # Bazowe kolory do transformacji
-        base_bg_dark = (20, 28, 38)
-        base_bg_mid = (28, 38, 48)
-        base_bg_light = (18, 25, 35)
-        base_accent = (70, 110, 140)
-        base_text = (180, 200, 216)
-        
-        # Zastosuj transformacje
-        bg_dark = apply_theme_to_color(base_bg_dark, hue, sat, bright, temp)
-        bg_mid = apply_theme_to_color(base_bg_mid, hue, sat, bright, temp)
-        bg_light = apply_theme_to_color(base_bg_light, hue, sat, bright, temp)
-        accent = apply_theme_to_color(base_accent, hue, sat, bright, temp)
-        text_color = apply_theme_to_color(base_text, hue, sat, bright, temp)
-
-        # Składniki kolorów do użycia w rgba(...)
-        a_r, a_g, a_b = accent
-        t_r, t_g, t_b = text_color
-        # Zachowaj do ponownego użycia w funkcjach stylujących przyciski/status
-        self._theme_accent_rgb = accent
-        self._theme_text_rgb = text_color
-
-        # Skala wygaszania elementów disabled zależnie od jasności (0 -> niewidoczne)
-        disabled_scale = max(0.0, min(1.0, bright / 100.0))
-        da_btn_bg = round(0.20 * disabled_scale, 3)
-        da_btn_border = round(0.30 * disabled_scale, 3)
-        da_btn_text = round(0.40 * disabled_scale, 3)
-        da_chk_text = round(0.40 * disabled_scale, 3)
-        da_chk_bg = round(0.06 * disabled_scale, 3)
-        da_chk_border = round(0.10 * disabled_scale, 3)
         
         print(f"[THEME-APPLY] Colors: dark={bg_dark}, mid={bg_mid}, light={bg_light}")
         
@@ -953,12 +965,13 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
                 if sid_path.lower().endswith(".sid"):
                     self.stop_sid_file()
                     self.sid_file = sid_path
+                    self.current_subtune = self.default_subtune  # Reset to default for new file
                     self.save_settings()  # Zapisz ostatnio odtwarzany plik
                     filename = os.path.basename(sid_path)
                     self.status_label.setText("LOADED")
                     self.read_metadata(sid_path)
-                    # Pobierz duration do obu zmiennych (current do sidplayfp, total do wyświetlania)
-                    self.current_song_duration = self.get_song_duration(sid_path)
+                    # Pobierz duration dla aktualnego subtune
+                    self.current_song_duration = self.get_song_duration(sid_path, self.current_subtune)
                     self.total_duration = self.current_song_duration
                     self.update_time_label()
                     self.update_ui_state()
@@ -987,6 +1000,29 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
             self.debug_console.log("[LOOP] Restarting playback due to loop change...")  # LOG RESTARTU
             self.stop_sid_file()
             self.start_playing()
+    
+    def toggle_default_tune_only(self, state):
+        """Toggle default tune only mode (ignore subtune navigation)."""
+        self.default_tune_only = (state == Qt.Checked)
+        mode = "DEFAULT TUNE ONLY" if self.default_tune_only else "ALL SUBTUNES"
+        print(f"[INFO] Subtune mode: {mode}")
+        self.debug_console.log(f"[SUBTUNE] Subtune mode changed to: {mode}")
+        
+        # Uaktualnij tekst z symbolem check dla lepszej czytelności
+        if self.default_tune_only:
+            self.default_tune_only_checkbox.setText("Default tune only ✓")
+        else:
+            self.default_tune_only_checkbox.setText("Default tune only")
+        
+        # Jeśli jest włączony i aktualnie gramy, resetuj do default subtune
+        if self.is_playing and self.default_tune_only:
+            if self.current_subtune != self.default_subtune:
+                self.debug_console.log(f"[SUBTUNE] Resetting to default subtune {self.default_subtune}")
+                self.current_subtune = self.default_subtune
+                self.update_ui_state()
+                # Restart playback to apply subtune change
+                self.stop_sid_file()
+                self.start_playing()
             
     def _on_prev_subtune_clicked(self):
         """Wrapper function to log button click"""
@@ -1269,34 +1305,80 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
             self.debug_console.log(f"[SEEK-SPEED] ⬇ Wracam do 1x (wysłano {arrows_to_send} DOWN arrows)")
 
     def closeEvent(self, event):
-        """Obsługa zamknięcia okna - Stop playback i zamknij debug console"""
-        self.save_settings()  # Zapisz ostatnio odtwarzany plik
-        self.stop_sid_file()
-        if self.debug_console:
-            self.debug_console.close()
-        if self.playlist_window:
-            self.playlist_window.close()
-        if self.theme_window:
-            self.theme_window.close()
+        """Obsługa zamknięcia okna - wywołaj cleanup_on_exit()"""
+        print("[CLOSE_EVENT] Window close detected - calling cleanup_on_exit()")
+        self.cleanup_on_exit()
         event.accept()
 
     def cleanup_on_exit(self):
-        """Ostateczne czyszczenie przy wyjściu aplikacji"""
+        """Ostateczne czyszczenie przy wyjściu aplikacji
+        
+        Strategia:
+        1. Zagraj mutesid.sid (wszystkie instrumenty mają volume=0)
+        2. To wycisza całe urządzenie
+        3. Czekaj krótko na załadowanie
+        4. Potem spokojnie zamknij procesy
+        
+        Gwarancja: Wywoływana tylko raz (idempotentna)
+        """
+        # WAŻNE: cleanup_on_exit() może być wywoływana wielokrotnie (closeEvent i aboutToQuit)
+        # Zrób to tylko raz!
+        if self._cleanup_done:
+            print("[EXIT] ⚠️  cleanup_on_exit() called again - already done, skipping")
+            return
+        
+        self._cleanup_done = True
+        print("[EXIT] ===== CLEANUP_ON_EXIT STARTED =====")
+        
         self.save_settings()  # Zapisz ostatnio odtwarzany plik
         self._save_playlist_on_exit()  # Zapisz playlistę
-        self.stop_sid_file()
-        if self.debug_console:
-            self.debug_console.close()
+        print("[EXIT] ✓ Settings and playlist saved")
+        
+        # Close any open windows (BEFORE audio shutdown, so they don't block exit)
+        print("[EXIT] Closing open windows...")
         if self.playlist_window:
-            self.playlist_window.close()
+            try:
+                self.playlist_window.close()
+                print("[EXIT] ✓ Playlist window closed")
+            except Exception as e:
+                print(f"[EXIT] ⚠️  Error closing playlist window: {e}")
+        
         if self.theme_window:
-            self.theme_window.close()
+            try:
+                self.theme_window.close()
+                print("[EXIT] ✓ Theme window closed")
+            except Exception as e:
+                print(f"[EXIT] ⚠️  Error closing theme window: {e}")
+        
+        # FAZA 2: Graceful shutdown using USB SID Pico menu sequence
+        print("[EXIT] FAZA 2: Graceful shutdown of audio engine...")
+        if self.audio_engine == "jsidplay2":
+            # Use proper USB SID Pico shutdown sequence: 1, 2, 3, q
+            success = self.graceful_shutdown_jsidplay2()
+            print(f"[EXIT] ✓ FAZA 2: JSidplay2 shutdown {'successful' if success else 'attempted'}")
+        else:
+            # For sidplayfp, use standard stop
+            self.stop_sid_file()
+            print("[EXIT] ✓ FAZA 2: sidplayfp stopped")
+        
+        # FAZA 4: Final cleanup - wait for process to close gracefully, then hard kill if needed
+        print(f"[EXIT] FAZA 4: Final check - process={self.process}")
         if self.process:
             try:
-                # Hard kill jeśli jeszcze żyje
-                self.process.kill()
-            except Exception:
-                pass
+                # Give process 2 seconds to close gracefully after shutdown sequence
+                print(f"[EXIT] Waiting for process PID={self.process.pid} to close gracefully...")
+                try:
+                    self.process.wait(timeout=2)
+                    print("[EXIT] ✓ Process closed gracefully")
+                except subprocess.TimeoutExpired:
+                    # Process didn't close - force kill
+                    print(f"[EXIT] ⚠️  Process did not close after 2 seconds - force killing PID={self.process.pid}")
+                    self.process.kill()
+                    print("[EXIT] ✓ Process force-killed")
+            except Exception as e:
+                print(f"[EXIT] ⚠️  Error during final cleanup: {e}")
+        
+        print("[EXIT] ✓✓✓ CLEANUP COMPLETE ✓✓✓")
 
     # ----------------------------------------------
     #               CZAS + METADANE
@@ -1315,14 +1397,25 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         self.stop_button.setEnabled(self.is_playing)
         self.fast_forward_button.setEnabled(self.is_playing)
 
+        # === UPDATE SUBTUNE NUMBER DISPLAY ===
+        # This ensures the subtune number updates during auto-advance
+        if hasattr(self, 'subtune_number'):
+            self.subtune_number.setText(str(self.current_subtune))
+            self.debug_console.log(f"[UI_STATE] ✓ Subtune display updated: {self.current_subtune}/{self.num_subtunes}")
+
         # Update subtune controls
         if hasattr(self, 'prev_subtune_button') and hasattr(self, 'next_subtune_button'):
-            # Enable prev only if: file loaded AND has multiple subtunes AND not at first subtune
-            prev_enabled = is_loaded and self.num_subtunes > 1 and self.current_subtune > 1
-            # Enable next only if: file loaded AND has multiple subtunes AND not at last subtune
-            next_enabled = is_loaded and self.num_subtunes > 1 and self.current_subtune < self.num_subtunes
-            print(f"[BUTTON_STATE] prev_subtune_button: enabled={prev_enabled}, is_loaded={is_loaded}, num_subtunes={self.num_subtunes}, current_subtune={self.current_subtune}, has_multi={self.num_subtunes > 1}")
-            print(f"[BUTTON_STATE] next_subtune_button: enabled={next_enabled}, is_loaded={is_loaded}, num_subtunes={self.num_subtunes}, current_subtune={self.current_subtune}, has_multi={self.num_subtunes > 1}")
+            # Block if "default tune only" mode is enabled
+            if self.default_tune_only:
+                prev_enabled = False
+                next_enabled = False
+            else:
+                # Enable prev only if: file loaded AND has multiple subtunes AND not at first subtune
+                prev_enabled = is_loaded and self.num_subtunes > 1 and self.current_subtune > 1
+                # Enable next only if: file loaded AND has multiple subtunes AND not at last subtune
+                next_enabled = is_loaded and self.num_subtunes > 1 and self.current_subtune < self.num_subtunes
+            print(f"[BUTTON_STATE] prev_subtune_button: enabled={prev_enabled}, is_loaded={is_loaded}, num_subtunes={self.num_subtunes}, current_subtune={self.current_subtune}, has_multi={self.num_subtunes > 1}, default_tune_only={self.default_tune_only}")
+            print(f"[BUTTON_STATE] next_subtune_button: enabled={next_enabled}, is_loaded={is_loaded}, num_subtunes={self.num_subtunes}, current_subtune={self.current_subtune}, has_multi={self.num_subtunes > 1}, default_tune_only={self.default_tune_only}")
             self.prev_subtune_button.setEnabled(prev_enabled)
             self.next_subtune_button.setEnabled(next_enabled)
 
@@ -1475,6 +1568,7 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
                 
                 # Ustaw nową piosenkę
                 self.sid_file = file_path
+                self.current_subtune = self.default_subtune  # Reset to default for new file
                 self.save_settings()  # Zapisz ostatnio odtwarzany plik
                 
                 # Załaduj metadane i informacje o piosence
@@ -1487,8 +1581,8 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
                     self.current_song_duration = duration
                     self.debug_console.log(f"[PLAYLIST] ✓ Używam czas z playlisty: {duration}s")
                 else:
-                    # Fallback: Pobierz duration dla sidplayfp i wyświetlania
-                    self.current_song_duration = self.get_song_duration(file_path)
+                    # Fallback: Pobierz duration dla aktualnego subtune
+                    self.current_song_duration = self.get_song_duration(file_path, self.current_subtune)
                     self.debug_console.log(f"[PLAYLIST] Fallback - przeliczony czas: {self.current_song_duration}s")
                 
                 self.total_duration = self.current_song_duration
@@ -1512,18 +1606,6 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         self.playlist_window = None
         self.update_ui_state()
         self.debug_console.log("[PLAYLIST] Playlist window closed - navigation buttons disabled")
-    
-    def next_song(self):
-        """Przejdź do następnego utworu w playliście - wywoływane po skończeniu obecnego"""
-        if self.playlist_window and hasattr(self.playlist_window, 'get_next_song'):
-            next_song_entry = self.playlist_window.get_next_song()
-            if next_song_entry:
-                self.debug_console.log(f"[AUTOPLAY] ▶ Next song: {next_song_entry.title}")
-                self.play_song_from_playlist(next_song_entry.file_path, next_song_entry.duration)
-            else:
-                self.debug_console.log("[AUTOPLAY] Brak następnej piosenki w playliście")
-        else:
-            self.debug_console.log("[AUTOPLAY] Playlist window not available or doesn't support next_song")
 
     # ----------------------------------------------
     #           THEME SETTINGS

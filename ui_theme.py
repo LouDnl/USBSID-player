@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QMessageBox, QProgressBar, QGroupBox, QFrame, QCheckBox
 )
-from PyQt5.QtGui import QFont, QPalette, QColor, QLinearGradient, QIcon
+from PyQt5.QtGui import QFont, QPalette, QColor, QLinearGradient, QIcon, QFontMetrics
 from PyQt5.QtCore import Qt, QTimer, QTime, pyqtSignal
 import os
 import ctypes
@@ -32,6 +32,7 @@ class UIThemeMixin:
         hue = self.theme_settings['hue']
         sat = self.theme_settings['saturation']
         bright = self.theme_settings['brightness']
+        contrast = self.theme_settings['contrast']
         temp = self.theme_settings['temperature']
         
         # Bazowe kolory do transformacji
@@ -42,11 +43,11 @@ class UIThemeMixin:
         base_text = (180, 200, 216)
         
         # Zastosuj transformacje
-        bg_dark = apply_theme_to_color(base_bg_dark, hue, sat, bright, temp)
-        bg_mid = apply_theme_to_color(base_bg_mid, hue, sat, bright, temp)
-        bg_light = apply_theme_to_color(base_bg_light, hue, sat, bright, temp)
-        accent = apply_theme_to_color(base_accent, hue, sat, bright, temp)
-        text_color = apply_theme_to_color(base_text, hue, sat, bright, temp)
+        bg_dark = apply_theme_to_color(base_bg_dark, hue, sat, bright, contrast, temp)
+        bg_mid = apply_theme_to_color(base_bg_mid, hue, sat, bright, contrast, temp)
+        bg_light = apply_theme_to_color(base_bg_light, hue, sat, bright, contrast, temp)
+        accent = apply_theme_to_color(base_accent, hue, sat, bright, contrast, temp)
+        text_color = apply_theme_to_color(base_text, hue, sat, bright, contrast, temp)
 
         # Składniki kolorów do użycia w rgba(...)
         a_r, a_g, a_b = accent
@@ -503,12 +504,15 @@ class UIThemeMixin:
 
         self.title_label = QLabel("DROP A SID FILE")
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setWordWrap(True)
         self.title_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
+        self.title_label.setMaximumHeight(90)  # Ograniczy wysokość aby tekst się nie wylewał
+        self.title_label.setMinimumHeight(60)  # Minimum height dla spójności
+        self.title_label.setMaximumWidth(350)  # Ograniczy szerokość aby tekst się zawijał
         self.title_label.setStyleSheet("""
             color: #c8dce8;
-            line-height: 0.1;
-            padding: 0px 2px;
+            line-height: 1.3;
+            padding: 2px 2px;
+            margin: 0px;
         """)
         hero_layout.addWidget(self.title_label)
         hero_layout.addSpacing(4)
@@ -624,16 +628,27 @@ class UIThemeMixin:
         
         layout.addSpacing(12)
 
-        # Loop checkbox
-        loop_layout = QHBoxLayout()
-        loop_layout.setAlignment(Qt.AlignCenter)
+        # Loop checkbox + Default tune only checkbox
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.setAlignment(Qt.AlignCenter)
+        
         self.loop_checkbox = QCheckBox("Loop Song")
         self.loop_checkbox.setObjectName("LoopCheckbox")
         self.loop_checkbox.setAttribute(Qt.WA_StyledBackground, True)
         self.loop_checkbox.setFont(QFont("Segoe UI", 11))
         self.loop_checkbox.stateChanged.connect(self.toggle_loop)
-        loop_layout.addWidget(self.loop_checkbox)
-        layout.addLayout(loop_layout)
+        checkbox_layout.addWidget(self.loop_checkbox)
+        
+        checkbox_layout.addSpacing(20)
+        
+        self.default_tune_only_checkbox = QCheckBox("Default tune only")
+        self.default_tune_only_checkbox.setObjectName("DefaultTuneCheckbox")
+        self.default_tune_only_checkbox.setAttribute(Qt.WA_StyledBackground, True)
+        self.default_tune_only_checkbox.setFont(QFont("Segoe UI", 11))
+        self.default_tune_only_checkbox.stateChanged.connect(self.toggle_default_tune_only)
+        checkbox_layout.addWidget(self.default_tune_only_checkbox)
+        
+        layout.addLayout(checkbox_layout)
 
         layout.addSpacing(24)
 
@@ -740,6 +755,33 @@ class UIThemeMixin:
                         break
                 except:
                     pass
+
+    # ===============================================
+    #         DYNAMIC TITLE FONT SCALING
+    # ===============================================
+    def scale_title_font(self, text):
+        """Skaluj rozmiar fontu title_label aby tekst zmieścił się bez dzielenia"""
+        if not text or not hasattr(self, 'title_label'):
+            return
+        
+        max_width = 350  # Maksymalna szerokość dostępna dla tekstu
+        min_font_size = 10  # Minimalny rozmiar czcionki
+        max_font_size = 24  # Maksymalny rozmiar czcionki
+        
+        # Start with max font size i zmniejszaj aż tekst się zmieści
+        for font_size in range(max_font_size, min_font_size - 1, -1):
+            font = QFont("Segoe UI", font_size, QFont.Bold)
+            metrics = QFontMetrics(font)
+            text_width = metrics.horizontalAdvance(text)
+            
+            # Jeśli tekst się zmieści, użyj tego rozmiaru
+            if text_width <= max_width:
+                self.title_label.setFont(font)
+                return
+        
+        # Jeśli nic nie passou, użyj minimalnego rozmiaru
+        font = QFont("Segoe UI", min_font_size, QFont.Bold)
+        self.title_label.setFont(font)
 
     # ----------------------------------------------
     #         ODCZYT SONG LENGTHS (SONGLENGTHS.MD5)

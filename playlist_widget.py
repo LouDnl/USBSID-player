@@ -7,10 +7,10 @@ Wyświetlanie, edycja i kontrola playlisty
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QLineEdit, QFileDialog, QMessageBox, QInputDialog,
-    QAbstractButton
+    QAbstractButton, QDialog, QProgressBar, QAbstractItemView
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QSize, QMimeData
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtCore import Qt, pyqtSignal, QSize, QMimeData, QThread, QObject, pyqtSlot
+from PyQt5.QtGui import QFont, QColor, QIcon
 from pathlib import Path
 from typing import Optional, Dict
 import hashlib
@@ -65,6 +65,207 @@ except ImportError:
     TRACKER_RECOGNITION_AVAILABLE = False
 
 
+# ===== WORKER THREAD CLASSES =====
+class FileAddingWorker(QObject):
+    """Worker thread do dodawania plików z folderu bez zacinania GUI"""
+    
+    # Signals
+    progress_updated = pyqtSignal(int, str)  # Emits (count, current_file_name)
+    finished = pyqtSignal(int)  # Emits total added count
+    error_occurred = pyqtSignal(str)  # Emits error message
+    cancelled = pyqtSignal()  # Emits when cancelled
+    
+    def __init__(self, folder_path: str = None, playlist_manager=None, song_lengths: Dict = None, paths: list = None, parent=None):
+        super().__init__(parent)
+        self.folder_path = folder_path
+        self.paths = paths or []  # Support for drag & drop multiple paths
+        self.playlist_manager = playlist_manager
+        self.song_lengths = song_lengths
+        self.is_cancelled = False
+    
+    def cancel(self):
+        """Anuluj przetwarzanie"""
+        self.is_cancelled = True
+    
+    @pyqtSlot()
+    def run(self):
+        """Główna logika worker thread - przetwarzaj pliki"""
+        try:
+            from pathlib import Path
+            added = 0
+            
+            # Snapshot of existing file paths to avoid race condition
+            existing_files = set(e.file_path for e in self.playlist_manager.entries)
+            
+            # Zbierz wszystkie pliki .sid do przetworzenia
+            all_sid_files = []
+            
+            # Jeśli folder_path jest podany (Add Folder)
+            if self.folder_path:
+                all_sid_files.extend(Path(self.folder_path).rglob("*.sid"))
+            
+            # Jeśli paths są podane (Drag & Drop)
+            if self.paths:
+                for path_str in self.paths:
+                    path = Path(path_str)
+                    if path.is_file() and path.suffix.lower() == '.sid':
+                        all_sid_files.append(path)
+                    elif path.is_dir():
+                        all_sid_files.extend(path.rglob("*.sid"))
+            
+            # Iterate through all .sid files
+            for file_path in all_sid_files:
+                if self.is_cancelled:
+                    self.cancelled.emit()
+                    return
+                
+                file_path_str = str(file_path)
+                
+                # Check if already in playlist
+                if file_path_str in existing_files:
+                    continue
+                
+                try:
+                    # Parse SID file to get metadata
+                    parser = SIDFileParser(file_path_str)
+                    
+                    # Get metadata from SID file
+                    title = parser.get_name() if parser.is_valid() else file_path.stem
+                    author = parser.get_author() if parser.is_valid() else "Unknown"
+                    year = parser.get_year_from_released() if parser.is_valid() else ""
+                    released = parser.get_released() if parser.is_valid() else ""
+                    
+                    # Get duration from Songlengths database
+                    md5_hash = self._get_file_md5(file_path_str)
+                    duration = self.song_lengths.get(md5_hash, 120)
+                    
+                    # Recognize tracker
+                    tracker = self._get_tracker_info(file_path_str)
+                    
+                    # Add to playlist
+                    entry = PlaylistEntry(file_path_str, title, author, duration, year, tracker=tracker, group=released)
+                    self.playlist_manager.entries.append(entry)
+                    added += 1
+                    
+                    # Emit progress signal
+                    self.progress_updated.emit(added, file_path.name)
+                    
+                except Exception as e:
+                    print(f"[ERROR] Błąd przetwarzania {file_path}: {e}")
+                    continue
+            
+            self.finished.emit(added)
+        
+        except Exception as e:
+            self.error_occurred.emit(f"Błąd podczas dodawania plików: {str(e)}")
+    
+    def _get_file_md5(self, filepath: str) -> str:
+        """Calculate MD5 hash of SID file"""
+        try:
+            with open(filepath, "rb") as f:
+                return hashlib.md5(f.read()).hexdigest().lower()
+        except Exception:
+            return ""
+    
+    def _get_tracker_info(self, filepath: str) -> str:
+        """Recognize tracker from SID file"""
+        if TRACKER_RECOGNITION_AVAILABLE:
+            try:
+                recognizer = get_recognizer()
+                tracker = recognizer.recognize_tracker(filepath, verbose=False)
+                result = tracker if tracker != "Unknown" else ""
+                return result
+            except Exception:
+                return ""
+        return ""
+
+
+class FileAddingProgressDialog(QDialog):
+    """Dialog pokazujący postęp dodawania plików z przyciskiem CANCEL"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📁 Adding Files to Playlist...")
+        self.setGeometry(200, 200, 400, 150)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowCloseButtonHint)  # Ukryj X button
+        self.setModal(True)
+        
+        # UI Layout
+        layout = QVBoxLayout()
+        
+        # Info label
+        self.info_label = QLabel("Initializing...")
+        layout.addWidget(self.info_label)
+        
+        # Counter label
+        self.counter_label = QLabel("Files added: 0")
+        self.counter_label.setStyleSheet("font-weight: bold; color: #888888;")
+        layout.addWidget(self.counter_label)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Indeterminate mode
+        layout.addWidget(self.progress_bar)
+        
+        # Buttons
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+        
+        self.cancel_button = QPushButton("❌ CANCEL")
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #888888;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #aaaaaab;
+            }
+        """)
+        buttons_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(buttons_layout)
+        self.setLayout(layout)
+    
+    @pyqtSlot(int, str)
+    def update_progress(self, count: int, filename: str):
+        """Update progress display"""
+        self.counter_label.setText(f"Files added: {count}")
+        self.info_label.setText(f"Processing: {filename}")
+    
+    @pyqtSlot(int)
+    def on_finished(self, count: int):
+        """Called when adding is finished"""
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(1)
+        self.counter_label.setText(f"✅ Completed! Added {count} files")
+        self.cancel_button.setText("✓ Close")
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #888888;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #aaaaaa;
+            }
+        """)
+    
+    @pyqtSlot()
+    def on_cancelled(self):
+        """Called when operation is cancelled"""
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.counter_label.setText("⏹️ Operation cancelled")
+        self.cancel_button.setText("✓ Close")
+
+
 class PlaylistWidget(QWidget):
     """Widget do zarządzania playlistą"""
     
@@ -81,6 +282,13 @@ class PlaylistWidget(QWidget):
         self.setObjectName("PlaylistWidget")
         
         self.setWindowTitle("🎵 Playlist")
+        
+        # --- WINDOW ICON ---
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        icon_path = os.path.join(assets_dir, "sid_ico.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        
         # Resize window - teraz mniejsze (ustawiane w sid_player_modern07.py)
         self.setGeometry(100, 100, 820, 450)
         self.setMinimumWidth(500)  # Zapobiega zmniejszeniu poniżej minimalnego rozmiaru
@@ -115,6 +323,11 @@ class PlaylistWidget(QWidget):
         # --- DRAG AND DROP SUPPORT ---
         self.setAcceptDrops(True)
         self.playlist_table.setAcceptDrops(True)
+        
+        # --- FILE ADDING WORKER THREAD ---
+        self.file_adding_thread = None
+        self.file_adding_worker = None
+        self.file_adding_dialog = None
     
     def load_songlengths(self):
         """Load Songlengths.md5 database"""
@@ -315,7 +528,8 @@ class PlaylistWidget(QWidget):
         hue = self.theme_settings.get('hue', 210)
         sat = self.theme_settings.get('saturation', 50)
         bright = self.theme_settings.get('brightness', 50)
-        temp = self.theme_settings.get('temperature', 50)
+        contrast = self.theme_settings.get('contrast', 256)
+        temp = self.theme_settings.get('temperature', 256)
         
         # Bazowe kolory (takie same jak w głównym oknie)
         base_bg_dark = (20, 28, 38)
@@ -324,10 +538,10 @@ class PlaylistWidget(QWidget):
         base_text = (180, 200, 216)
         
         # Zastosuj transformacje
-        bg_dark = apply_theme_to_color(base_bg_dark, hue, sat, bright, temp)
-        bg_mid = apply_theme_to_color(base_bg_mid, hue, sat, bright, temp)
-        accent = apply_theme_to_color(base_accent, hue, sat, bright, temp)
-        text_color = apply_theme_to_color(base_text, hue, sat, bright, temp)
+        bg_dark = apply_theme_to_color(base_bg_dark, hue, sat, bright, contrast, temp)
+        bg_mid = apply_theme_to_color(base_bg_mid, hue, sat, bright, contrast, temp)
+        accent = apply_theme_to_color(base_accent, hue, sat, bright, contrast, temp)
+        text_color = apply_theme_to_color(base_text, hue, sat, bright, contrast, temp)
         
         # Rozpakowuj kolory
         a_r, a_g, a_b = accent
@@ -543,48 +757,93 @@ class PlaylistWidget(QWidget):
                         return
     
     def add_folder(self):
-        """Add all .sid files from folder"""
+        """Add all .sid files from folder using worker thread (non-blocking)"""
         folder = QFileDialog.getExistingDirectory(
             self,
             "Select folder",
             "n:\\- Programs\\Thonny\\- MOJE\\sidplayer"
         )
         
-        if folder:
-            from pathlib import Path
-            added = 0
-            
-            # Iterate through all .sid files in folder
-            for file_path in Path(folder).glob("*.sid"):
-                file_path_str = str(file_path)
-                
-                # Check if already in playlist
-                if any(e.file_path == file_path_str for e in self.playlist_manager.entries):
-                    continue
-                
-                # Parse SID file to get metadata
-                parser = SIDFileParser(file_path_str)
-                
-                # Get metadata from SID file
-                title = parser.get_name() if parser.is_valid() else file_path.stem
-                author = parser.get_author() if parser.is_valid() else "Unknown"
-                year = parser.get_year_from_released() if parser.is_valid() else ""
-                released = parser.get_released() if parser.is_valid() else ""
-                
-                # Get duration from Songlengths database
-                duration = self.get_song_duration_from_db(file_path_str)
-                tracker = self._get_tracker_info(file_path_str)
-                
-                # Add to playlist
-                entry = PlaylistEntry(file_path_str, title, author, duration, year, tracker=tracker, group=released)
-                self.playlist_manager.entries.append(entry)
-                added += 1
-            
-            self.update_list()
-            self.playlist_changed.emit()
-            if added > 0:
-                self._autosave_playlist()  # Auto-save after adding
-            QMessageBox.information(self, "Success", f"Added {added} songs")
+        if not folder:
+            return
+        
+        # Create progress dialog
+        self.file_adding_dialog = FileAddingProgressDialog(self)
+        
+        # Create worker thread
+        self.file_adding_thread = QThread()
+        self.file_adding_worker = FileAddingWorker(
+            folder, 
+            self.playlist_manager, 
+            self.song_lengths
+        )
+        
+        # Move worker to thread
+        self.file_adding_worker.moveToThread(self.file_adding_thread)
+        
+        # Connect signals with QueuedConnection to ensure thread-safe execution
+        self.file_adding_thread.started.connect(self.file_adding_worker.run, Qt.QueuedConnection)
+        self.file_adding_worker.progress_updated.connect(self.file_adding_dialog.update_progress, Qt.QueuedConnection)
+        self.file_adding_worker.finished.connect(self._on_files_added_finished, Qt.QueuedConnection)
+        self.file_adding_worker.finished.connect(self.file_adding_dialog.on_finished, Qt.QueuedConnection)
+        self.file_adding_worker.error_occurred.connect(self._on_file_adding_error, Qt.QueuedConnection)
+        self.file_adding_worker.cancelled.connect(self.file_adding_dialog.on_cancelled, Qt.QueuedConnection)
+        
+        # Cancel button
+        self.file_adding_dialog.cancel_button.clicked.connect(self._on_cancel_file_adding)
+        
+        # Show dialog
+        self.file_adding_dialog.show()
+        
+        # Start thread
+        self.file_adding_thread.start()
+    
+    @pyqtSlot(int)
+    def _on_files_added_finished(self, count: int):
+        """Called when file adding is finished"""
+        self.update_list()
+        self.playlist_changed.emit()
+        if count > 0:
+            self._autosave_playlist()  # Auto-save after adding
+        
+        # Close dialog after 3 seconds
+        from PyQt5.QtCore import QTimer
+        if self.file_adding_dialog:
+            QTimer.singleShot(3000, lambda: self._close_file_adding_dialog())
+    
+    @pyqtSlot(str)
+    def _on_file_adding_error(self, error_msg: str):
+        """Called when error occurs during file adding"""
+        if self.file_adding_dialog:
+            self.file_adding_dialog.close()
+        QMessageBox.critical(self, "Error", error_msg)
+    
+    @pyqtSlot()
+    def _on_cancel_file_adding(self):
+        """Cancel file adding operation"""
+        if self.file_adding_worker:
+            self.file_adding_worker.cancel()
+        
+        # Close dialog when already finished
+        if self.file_adding_dialog and self.file_adding_worker and self.file_adding_worker.is_cancelled:
+            self._close_file_adding_dialog()
+    
+    def _close_file_adding_dialog(self):
+        """Close file adding dialog and clean up thread"""
+        if self.file_adding_dialog:
+            try:
+                self.file_adding_dialog.close()
+            except:
+                pass
+        
+        # Clean up thread
+        if self.file_adding_thread and self.file_adding_thread.isRunning():
+            self.file_adding_thread.quit()
+            self.file_adding_thread.wait()
+        
+        self.file_adding_thread = None
+        self.file_adding_worker = None
+        self.file_adding_dialog = None
     
     def on_regenerate_trackers(self):
         """Regenerate tracker info for all playlist entries"""
@@ -595,13 +854,36 @@ class PlaylistWidget(QWidget):
             QMessageBox.information(self, "ℹ️  Info", "All songs already have tracker info or playlist is empty")
     
     def remove_selected(self):
-        """Remove selected song"""
-        current_row = self.playlist_table.currentRow()
-        if current_row >= 0:
-            self.playlist_manager.remove(current_row)
-            self.update_list()
-            self.playlist_changed.emit()
-            self._autosave_playlist()  # Auto-save after removing
+        """Remove selected songs (supports multiple selection)"""
+        selected_rows = self.playlist_table.selectedIndexes()
+        
+        if not selected_rows:
+            return
+        
+        # Extract unique row indices from selected indexes
+        unique_rows = set()
+        for index in selected_rows:
+            unique_rows.add(index.row())
+        
+        # Collect actual playlist indices from UserRole data
+        indices_to_remove = []
+        for row in unique_rows:
+            item = self.playlist_table.item(row, 0)
+            if item:
+                actual_idx = item.data(Qt.UserRole)
+                if actual_idx is None:
+                    actual_idx = row
+            else:
+                actual_idx = row
+            indices_to_remove.append(actual_idx)
+        
+        # Remove in reverse order to prevent index shifting
+        for actual_idx in sorted(indices_to_remove, reverse=True):
+            self.playlist_manager.remove(actual_idx)
+        
+        self.update_list()
+        self.playlist_changed.emit()
+        self._autosave_playlist()  # Auto-save after removing
     
     def clear_playlist(self):
         """Clear entire playlist"""
@@ -744,19 +1026,49 @@ class PlaylistWidget(QWidget):
         """Handle selection change"""
         current_row = self.playlist_table.currentRow()
         if current_row >= 0:
-            entry = self.playlist_manager.entries[current_row]
+            # **FIX: Get the actual playlist index from the item data (not the table row index)**
+            # This ensures correct song info shows when searching or filtering
+            item = self.playlist_table.item(current_row, 0)
+            if item:
+                actual_idx = item.data(Qt.UserRole)
+                if actual_idx is None:
+                    actual_idx = current_row
+            else:
+                actual_idx = current_row
+            
+            entry = self.playlist_manager.entries[actual_idx]
             self.song_selected.emit(entry.file_path)
     
     def on_song_double_clicked(self, item: QTableWidgetItem):
         """Double-click - play song"""
         row = self.playlist_table.row(item)
         if row >= 0:
-            self.playlist_manager.set_current(row)
-            file_path = self.playlist_manager.entries[row].file_path
-            duration = self.playlist_manager.entries[row].duration
+            # **FIX: Get the actual playlist index from the item data (not the table row index)**
+            # This ensures correct song plays when searching or filtering
+            actual_idx = item.data(Qt.UserRole)
+            if actual_idx is None:
+                # Fallback for compatibility
+                actual_idx = row
+            
+            self.playlist_manager.set_current(actual_idx)
+            file_path = self.playlist_manager.entries[actual_idx].file_path
+            duration = self.playlist_manager.entries[actual_idx].duration
             self.song_double_clicked.emit(file_path, duration)
-            self.current_playing_index = row
+            self.current_playing_index = actual_idx
             self.update_list()
+            
+            # 🎯 HIGHLIGHT: Select row, scroll to center, and bold the selected item
+            # After update_list(), find the row that corresponds to current_playing_index
+            for row_idx in range(self.playlist_table.rowCount()):
+                cell_item = self.playlist_table.item(row_idx, 0)
+                if cell_item and cell_item.data(Qt.UserRole) == self.current_playing_index:
+                    # Found the correct row
+                    self.playlist_table.clearSelection()
+                    self.playlist_table.selectRow(row_idx)
+                    
+                    # Scroll to the row and center it
+                    self.playlist_table.scrollToItem(cell_item, QAbstractItemView.PositionAtCenter)
+                    break
     
     def add_table_row(self, entry: PlaylistEntry, idx: int, is_highlighted: bool = False):
         """Add row to table"""
@@ -783,6 +1095,10 @@ class PlaylistWidget(QWidget):
         for col, text in items:
             item = QTableWidgetItem(text)
             
+            # **IMPORTANT: Store the actual playlist index in the item data**
+            # This is used to map table rows back to original playlist entries
+            item.setData(Qt.UserRole, idx)
+            
             # Ustaw background i text color używając setData z Qt.BackgroundRole
             if hasattr(self, 'bg_mid_color'):
                 item.setData(Qt.BackgroundRole, self.bg_mid_color)
@@ -804,9 +1120,12 @@ class PlaylistWidget(QWidget):
             if idx == self.current_playing_index:
                 font = QFont()
                 font.setBold(True)
-                font.setPointSize(9)
+                font.setPointSize(10)  # Larger font
                 item.setFont(font)
+                # Bardziej widoczny kolor tekstu
                 item.setForeground(QColor("#00ff00"))
+                # Wyraźne tło dla aktualnie granego utworu
+                item.setBackground(QColor(50, 80, 120))  # Bright blue-ish tint
             
             self.playlist_table.setItem(row_position, col, item)
     
@@ -889,9 +1208,9 @@ class PlaylistWidget(QWidget):
                 self.current_playing_index = idx
                 # Select the row in the table to follow the playback
                 self.playlist_table.setCurrentCell(idx, 0)
-                # Ensure the selected row is visible
+                # Scroll to center - keeps song visible in middle of window
                 self.playlist_table.scrollToItem(self.playlist_table.item(idx, 0), 
-                                                 self.playlist_table.EnsureVisible)
+                                                 self.playlist_table.PositionAtCenter)
                 # Refresh the display to highlight the current playing song
                 self.update_list()
                 return
@@ -927,46 +1246,42 @@ class PlaylistWidget(QWidget):
     
     def handle_dropped_items(self, paths: list):
         """
-        Process dropped files and folders
+        Process dropped files and folders using worker thread (non-blocking)
         Automatically adds .sid files from files or recursively from folders
         """
-        added = 0
-        skipped = 0
+        if not paths:
+            return
         
-        for path_str in paths:
-            path = Path(path_str)
-            
-            if path.is_file():
-                # Single file
-                if path.suffix.lower() == '.sid':
-                    if self._add_single_file(str(path)):
-                        added += 1
-                    else:
-                        skipped += 1
-            
-            elif path.is_dir():
-                # Folder - add all .sid files recursively
-                sid_files = list(path.rglob("*.sid"))
-                
-                for file_path in sid_files:
-                    if self._add_single_file(str(file_path)):
-                        added += 1
-                    else:
-                        skipped += 1
+        # Create progress dialog
+        self.file_adding_dialog = FileAddingProgressDialog(self)
         
-        if added > 0:
-            self.update_list()
-            self.playlist_changed.emit()
-            self._autosave_playlist()  # Auto-save after drag-and-drop
+        # Create worker thread
+        self.file_adding_thread = QThread()
+        self.file_adding_worker = FileAddingWorker(
+            playlist_manager=self.playlist_manager, 
+            song_lengths=self.song_lengths,
+            paths=paths  # Pass dropped paths directly
+        )
         
-        # Show result message
-        if added > 0 or skipped > 0:
-            msg = f"Added: {added} songs"
-            if skipped > 0:
-                msg += f" | Skipped: {skipped} (duplicates)"
-            QMessageBox.information(self, "Drop Result", msg)
-        else:
-            QMessageBox.warning(self, "No Files", "No .sid files found in dropped items")
+        # Move worker to thread
+        self.file_adding_worker.moveToThread(self.file_adding_thread)
+        
+        # Connect signals with QueuedConnection to ensure thread-safe execution
+        self.file_adding_thread.started.connect(self.file_adding_worker.run, Qt.QueuedConnection)
+        self.file_adding_worker.progress_updated.connect(self.file_adding_dialog.update_progress, Qt.QueuedConnection)
+        self.file_adding_worker.finished.connect(self._on_files_added_finished, Qt.QueuedConnection)
+        self.file_adding_worker.finished.connect(self.file_adding_dialog.on_finished, Qt.QueuedConnection)
+        self.file_adding_worker.error_occurred.connect(self._on_file_adding_error, Qt.QueuedConnection)
+        self.file_adding_worker.cancelled.connect(self.file_adding_dialog.on_cancelled, Qt.QueuedConnection)
+        
+        # Cancel button
+        self.file_adding_dialog.cancel_button.clicked.connect(self._on_cancel_file_adding)
+        
+        # Show dialog
+        self.file_adding_dialog.show()
+        
+        # Start thread
+        self.file_adding_thread.start()
     
     def _add_single_file(self, file_path_str: str) -> bool:
         """
@@ -1006,6 +1321,11 @@ class PlaylistWidget(QWidget):
             self.playlist_manager.save()
         except Exception as e:
             print(f"⚠️  Error auto-saving playlist: {e}")
+    
+    def closeEvent(self, event):
+        """Clean up threads when closing window"""
+        self._close_file_adding_dialog()
+        super().closeEvent(event)
 
 
 # --- DEMO STANDALONE ---

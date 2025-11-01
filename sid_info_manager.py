@@ -30,24 +30,6 @@ from utils import format_artist_name, format_tracker_name
 
 class SIDInfoMixin:
     """Mixin providing SID file information and metadata parsing methods for SID Player"""
-    
-    def scale_title_font(self, text):
-        """Skaluj font tytułu na podstawie liczby znaków"""
-        char_count = len(text)
-        
-        if char_count <= 15:
-            font_size = 32
-        elif char_count <= 25:
-            font_size = 26
-        elif char_count <= 35:
-            font_size = 20
-        elif char_count <= 45:
-            font_size = 16
-        else:
-            font_size = 12
-        
-        font = QFont("Arial", font_size, QFont.Bold)
-        self.title_label.setFont(font)
 
     def load_song_lengths(self):
         """Odczytuje plik Songlengths.md5 z katalogu sidplayer (format MD5).
@@ -221,7 +203,11 @@ class SIDInfoMixin:
                 # Czytaj liczbę subtunes (offset 0x0E) i default subtune (offset 0x10)
                 self.num_subtunes = int.from_bytes(data[0x0E:0x10], 'big')
                 self.default_subtune = int.from_bytes(data[0x10:0x12], 'big')
-                self.current_subtune = self.default_subtune
+                
+                # Jeśli current_subtune już został ustawiony i jest w zakresie, zachowaj go
+                # (np. przy auto-advance subtune)
+                if not hasattr(self, 'current_subtune') or self.current_subtune == 0 or self.current_subtune > self.num_subtunes:
+                    self.current_subtune = self.default_subtune
                 
                 print(f"[METADATA_DEBUG] Loaded: num_subtunes={self.num_subtunes}, default_subtune={self.default_subtune}, current_subtune={self.current_subtune}")
                 self.debug_console.log(f"[INFO] SID contains {self.num_subtunes} subtune(s), default: {self.default_subtune}")
