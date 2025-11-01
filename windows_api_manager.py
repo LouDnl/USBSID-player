@@ -1,0 +1,447 @@
+"""
+Windows API Manager Mixin for SID Player
+=========================================
+
+This module provides Windows-specific API functions for console window management
+and keyboard input simulation. It handles:
+- Console window discovery via EnumWindows
+- Window visibility control
+- Virtual key simulation (arrow keys and character input)
+- Cross-platform compatibility fallbacks
+
+Author: Refactored from sid_player_modern07.py
+"""
+
+import sys
+import os
+import time
+import ctypes
+from ctypes import wintypes
+
+
+class WindowsAPIManagerMixin:
+    """
+    Mixin class for Windows API operations.
+    
+    Provides methods for:
+    - Finding and managing console windows
+    - Simulating keyboard input to console windows
+    - Cross-platform fallbacks for non-Windows systems
+    
+    Expected to be mixed with a class that has:
+    - self.debug_console (for logging)
+    - self.process (subprocess instance)
+    - self.sid_file (path to currently playing file)
+    - self.sidplayfp_path (path to sidplayfp executable)
+    """
+    
+    # ================================================
+    #     WINDOWS API HELPER FUNCTIONS
+    # ================================================
+    
+    def setup_windows_api(self):
+        """
+        Setup Windows API functions for finding console window and sending keys.
+        
+        Initializes user32.dll functions and their signatures for:
+        - EnumWindows: Enumerate all windows
+        - GetClassNameW: Get window class name
+        - GetWindowTextW: Get window title
+        - PostMessageW: Send messages to windows
+        - ShowWindow: Control window visibility
+        
+        Stores references to these functions and WinAPI constants as instance variables.
+        """
+        try:
+            self.user32 = ctypes.WinDLL('user32', use_last_error=True)
+            
+            # Constants for window messages and virtual keys
+            self.WM_KEYDOWN = 0x0100
+            self.WM_KEYUP = 0x0101
+            self.VK_UP = 0x26
+            self.VK_DOWN = 0x28
+            self.VK_LEFT = 0x25
+            self.VK_RIGHT = 0x27
+            
+            # API function: GetWindowThreadProcessId
+            self.GetWindowThreadProcessId = self.user32.GetWindowThreadProcessId
+            self.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+            self.GetWindowThreadProcessId.restype = wintypes.DWORD
+            
+            # API function: GetClassNameW
+            self.GetClassNameW = self.user32.GetClassNameW
+            self.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+            self.GetClassNameW.restype = ctypes.c_int
+            
+            # API function: GetWindowTextW
+            self.GetWindowTextW = self.user32.GetWindowTextW
+            self.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+            self.GetWindowTextW.restype = ctypes.c_int
+            
+            # API function: PostMessageW
+            self.PostMessageW = self.user32.PostMessageW
+            self.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+            self.PostMessageW.restype = wintypes.BOOL
+            
+            # API function: ShowWindow
+            self.ShowWindow = self.user32.ShowWindow
+            self.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+            self.ShowWindow.restype = wintypes.BOOL
+            
+            self.debug_console.log("[WINAPI] Windows API setup completed")
+        except Exception as e:
+            self.debug_console.log(f"[WINAPI] Failed to setup Windows API: {e}")
+    
+    def find_console_hwnd_for_sidplay(self, title_hints):
+        """
+        Search for console window (ConsoleWindowClass) for sidplayfp/jsidplay2.
+        
+        Uses EnumWindows callback to iterate through all windows and find
+        the first ConsoleWindowClass window whose title matches one of the hints.
+        
+        Args:
+            title_hints (list): List of strings to search for in window title
+                               (case-insensitive). E.g., ['sidplayfp', 'song.sid']
+        
+        Returns:
+            int: Window handle (HWND) if found, None otherwise
+            
+        Platform: Windows only - returns None on non-Windows systems
+        """
+        if sys.platform != "win32":
+            return None
+            
+        matches = []
+        all_console_windows = []  # For diagnostics
+        
+        def enum_callback(hwnd, lParam):
+            try:
+                buf = ctypes.create_unicode_buffer(256)
+                self.GetClassNameW(hwnd, buf, 256)
+                if buf.value != 'ConsoleWindowClass':
+                    return True
+                
+                # Found a console window - log it for diagnostics
+                tbuf = ctypes.create_unicode_buffer(512)
+                self.GetWindowTextW(hwnd, tbuf, 512)
+                title = tbuf.value
+                all_console_windows.append((hwnd, title))
+                
+                # Check if title matches any hint
+                title_lower = title.lower()
+                for hint in title_hints:
+                    if hint and hint.lower() in title_lower:
+                        matches.append(hwnd)
+                        return False  # Stop enumeration
+                return True
+            except Exception as e:
+                self.debug_console.log(f"[WINAPI] Error in enum_callback: {e}")
+                return True
+        
+        EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        enum_proc = EnumWindowsProc(enum_callback)
+        
+        try:
+            self.user32.EnumWindows(enum_proc, 0)
+        except Exception as e:
+            self.debug_console.log(f"[WINAPI] EnumWindows error: {e}")
+        
+        # Log diagnostics if no match found
+        if not matches and all_console_windows:
+            self.debug_console.log(f"[WINAPI] 📊 Found {len(all_console_windows)} console window(s) but NO MATCH:")
+            for hwnd, title in all_console_windows:
+                self.debug_console.log(f"[WINAPI]   - HWND={hex(hwnd)}: '{title}'")
+            self.debug_console.log(f"[WINAPI]   Searching for hints: {[h for h in title_hints if h]}")
+        
+        return matches[0] if matches else None
+    
+    def hide_console_window_for_sidplay(self):
+        """
+        Hide console window for sidplayfp after it's found.
+        
+        Attempts to find and hide the console window completely (no taskbar icon).
+        Retries for up to 3 seconds with short intervals to handle delayed window creation.
+        
+        Returns:
+            bool: True if console was hidden, False if not found or error occurred
+            
+        Platform: Windows only - returns False on non-Windows systems
+        """
+        if sys.platform != "win32" or not self.sid_file:
+            return False
+            
+        hints = [
+            'sidplayfp',
+            os.path.basename(self.sid_file),
+            os.path.basename(self.sidplayfp_path)
+        ]
+        
+        # Try for 3 seconds with short intervals (150 attempts * 0.02s)
+        for attempt in range(150):
+            hwnd = self.find_console_hwnd_for_sidplay(hints)
+            if hwnd:
+                # Hide window completely (no taskbar icon)
+                SW_HIDE = 0
+                self.ShowWindow(hwnd, SW_HIDE)
+                self.debug_console.log(f"[WINAPI] ✓ Console window hidden: HWND={hwnd} (attempt {attempt+1})")
+                # Additional hiding after short delay (sometimes window tries to show again)
+                time.sleep(0.05)
+                self.ShowWindow(hwnd, SW_HIDE)
+                return True
+            time.sleep(0.02)  # Short intervals = faster detection
+        
+        self.debug_console.log("[WINAPI] ⚠ Console window not found for hiding after 3 seconds")
+        return False
+    
+    def simulate_arrow_key(self, is_up_arrow=True):
+        """
+        Simulate UP or DOWN ARROW key press to console window.
+        
+        Uses PostMessage to send WM_KEYDOWN and WM_KEYUP messages to the
+        console window running sidplayfp/jsidplay2.
+        
+        Args:
+            is_up_arrow (bool): True to simulate UP arrow, False for DOWN arrow
+        
+        Returns:
+            bool: True if key was sent successfully, False if window not found or error
+            
+        Platform: Windows only - returns False on non-Windows systems
+        """
+        if sys.platform != "win32" or not self.process or not self.sid_file:
+            return False
+            
+        hints = [
+            'sidplayfp',
+            os.path.basename(self.sid_file),
+            os.path.basename(self.sidplayfp_path)
+        ]
+        
+        hwnd = self.find_console_hwnd_for_sidplay(hints)
+        if not hwnd:
+            self.debug_console.log("[WINAPI] Console window not found for key simulation")
+            return False
+        
+        vk_code = self.VK_UP if is_up_arrow else self.VK_DOWN
+        scan = 0x48 if is_up_arrow else 0x50  # Scancodes for UP/DOWN arrows
+        repeat = 1
+        extended = 1
+        
+        # lParam for key messages
+        lparam_down = (repeat & 0xFFFF) | ((scan & 0xFF) << 16) | (extended << 24)
+        lparam_up = lparam_down | (1 << 30) | (1 << 31)
+        
+        try:
+            self.PostMessageW(hwnd, self.WM_KEYDOWN, vk_code, lparam_down)
+            self.PostMessageW(hwnd, self.WM_KEYUP, vk_code, lparam_up)
+            key_name = "UP" if is_up_arrow else "DOWN"
+            self.debug_console.log(f"[WINAPI] {key_name} ARROW sent to HWND={hwnd}")
+            return True
+        except Exception as e:
+            self.debug_console.log(f"[WINAPI] PostMessage error: {e}")
+            return False
+    
+    def simulate_arrow_key_left_right(self, is_left=True):
+        """
+        Simulate LEFT or RIGHT ARROW key press to console window.
+        
+        Uses PostMessage to send WM_KEYDOWN and WM_KEYUP messages to the
+        console window running sidplayfp/jsidplay2.
+        
+        Args:
+            is_left (bool): True to simulate LEFT arrow, False for RIGHT arrow
+        
+        Returns:
+            bool: True if key was sent successfully, False if window not found or error
+            
+        Platform: Windows only - returns False on non-Windows systems
+        """
+        if sys.platform != "win32" or not self.process or not self.sid_file:
+            return False
+            
+        hints = [
+            'sidplayfp',
+            os.path.basename(self.sid_file),
+            os.path.basename(self.sidplayfp_path)
+        ]
+        
+        hwnd = self.find_console_hwnd_for_sidplay(hints)
+        if not hwnd:
+            self.debug_console.log("[WINAPI] Console window not found for key simulation")
+            return False
+        
+        # Virtual key codes for LEFT/RIGHT ARROW
+        vk_code = self.VK_LEFT if is_left else self.VK_RIGHT
+        scan = 0x4B if is_left else 0x4D  # Scancodes for LEFT/RIGHT arrows
+        repeat = 1
+        extended = 1
+        
+        # lParam for key messages
+        lparam_down = (repeat & 0xFFFF) | ((scan & 0xFF) << 16) | (extended << 24)
+        lparam_up = lparam_down | (1 << 30) | (1 << 31)
+        
+        try:
+            self.PostMessageW(hwnd, self.WM_KEYDOWN, vk_code, lparam_down)
+            self.PostMessageW(hwnd, self.WM_KEYUP, vk_code, lparam_up)
+            key_name = "LEFT" if is_left else "RIGHT"
+            self.debug_console.log(f"[WINAPI] {key_name} ARROW sent to HWND={hwnd}")
+            return True
+        except Exception as e:
+            self.debug_console.log(f"[WINAPI] PostMessage error: {e}")
+            return False
+    
+    def send_key_to_sidplay(self, key_char):
+        """
+        Send any single character key to sidplayfp console.
+        
+        Cross-platform implementation:
+        - Windows: Uses PostMessage to send key to console window
+        - Other systems: Uses stdin input fallback via send_input_to_sidplay()
+        
+        Args:
+            key_char (str): Single character to send (e.g., 'p' for pause)
+        
+        Returns:
+            bool: True if key was sent successfully, False otherwise
+            
+        Note:
+            Requires self.send_input_to_sidplay() method for non-Windows fallback
+        """
+        if not self.process or not self.sid_file:
+            return False
+        
+        if sys.platform == "win32":
+            # On Windows use PostMessage
+            hints = [
+                'sidplayfp',
+                os.path.basename(self.sid_file),
+                os.path.basename(self.sidplayfp_path)
+            ]
+            
+            hwnd = self.find_console_hwnd_for_sidplay(hints)
+            if not hwnd:
+                self.debug_console.log(f"[WINAPI] Console window not found for key '{key_char}'")
+                return False
+            
+            # Virtual key codes for letters
+            vk_map = {
+                'p': 0x50,  # VK_P
+                'P': 0x50,  # VK_P (uppercase)
+            }
+            
+            vk_code = vk_map.get(key_char, ord(key_char.upper()))
+            scan = 0x19  # Scancode for P
+            repeat = 1
+            extended = 0
+            
+            lparam_down = (repeat & 0xFFFF) | ((scan & 0xFF) << 16) | (extended << 24)
+            lparam_up = lparam_down | (1 << 30) | (1 << 31)
+            
+            try:
+                self.PostMessageW(hwnd, self.WM_KEYDOWN, vk_code, lparam_down)
+                self.PostMessageW(hwnd, self.WM_KEYUP, vk_code, lparam_up)
+                self.debug_console.log(f"[WINAPI] Key '{key_char}' sent to HWND={hwnd}")
+                return True
+            except Exception as e:
+                self.debug_console.log(f"[WINAPI] PostMessage error for key '{key_char}': {e}")
+                return False
+        else:
+            # On other systems send to stdin
+            self.send_input_to_sidplay(key_char)
+            return True
+    
+    def send_char_sequence_to_console(self, char_list):
+        """
+        Send sequence of characters to jsidplay2 console (each character + Enter).
+        
+        Cross-platform implementation:
+        - Windows: Uses PostMessage to send characters to console window
+        - Other systems: Uses stdin input with newlines via send_input_to_sidplay()
+        
+        Args:
+            char_list (list): List of characters to send
+                             (e.g., ['1', '2', '3'] for subtunes 1, 2, 3)
+        
+        Returns:
+            bool: True if all characters were sent successfully, False on error
+            
+        Note:
+            Requires self.send_input_to_sidplay() method for non-Windows fallback
+            Each character is followed by an Enter key press
+        """
+        if not self.process or not self.sid_file:
+            self.debug_console.log(f"[WINAPI] Cannot send sequence: process={bool(self.process)}, sid_file={bool(self.sid_file)}")
+            return False
+        
+        if sys.platform != "win32":
+            # On other systems send to stdin
+            self.debug_console.log(f"[WINAPI] Non-Windows platform detected - using stdin fallback")
+            for char in char_list:
+                self.send_input_to_sidplay(char + '\n')
+            return True
+        
+        # On Windows use PostMessage
+        hints = [
+            'jsidplay2',
+            os.path.basename(self.sid_file),
+            'jsidplay2-console.exe'
+        ]
+        
+        self.debug_console.log(f"[WINAPI] 🔍 Searching for jsidplay2 console window with hints: {hints}")
+        hwnd = self.find_console_hwnd_for_sidplay(hints)
+        
+        if not hwnd:
+            self.debug_console.log(f"[WINAPI] ✗ Console window NOT FOUND for jsidplay2")
+            self.debug_console.log(f"[WINAPI] 💡 Debug info:")
+            self.debug_console.log(f"[WINAPI]   - SID file: {self.sid_file}")
+            self.debug_console.log(f"[WINAPI]   - Hints: jsidplay2, {os.path.basename(self.sid_file)}, jsidplay2-console.exe")
+            self.debug_console.log(f"[WINAPI]   - Make sure jsidplay2 window is visible")
+            return False
+        
+        self.debug_console.log(f"[WINAPI] ✓ Console window FOUND: HWND={hex(hwnd)}")
+        
+        # Map of scancodes for keys
+        scan_map = {
+            '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05, '5': 0x06,
+            '6': 0x07, '7': 0x08, '8': 0x09, '9': 0x0A,
+            'a': 0x1E, 'b': 0x30, 'c': 0x2E, 'q': 0x10,
+            'Enter': 0x1C
+        }
+        
+        VK_RETURN = 0x0D  # VK code for Enter
+        
+        try:
+            for char in char_list:
+                # Send character
+                if char.lower() in scan_map:
+                    scan = scan_map[char.lower()]
+                    vk_code = ord(char.upper())
+                    repeat = 1
+                    extended = 0
+                    
+                    lparam_down = (repeat & 0xFFFF) | ((scan & 0xFF) << 16) | (extended << 24)
+                    lparam_up = lparam_down | (1 << 30) | (1 << 31)
+                    
+                    # DEBUG: Log the actual values being sent
+                    self.debug_console.log(f"[WINAPI] Sending '{char}': VK=0x{vk_code:02X}, SCAN=0x{scan:02X}, HWND={hex(hwnd)}")
+                    
+                    self.PostMessageW(hwnd, self.WM_KEYDOWN, vk_code, lparam_down)
+                    self.PostMessageW(hwnd, self.WM_KEYUP, vk_code, lparam_up)
+                    self.debug_console.log(f"[JSIDPLAY2] ✓ Sent key '{char}'")
+                    time.sleep(0.1)
+                
+                # Send Enter
+                lparam_down = (1 & 0xFFFF) | ((0x1C & 0xFF) << 16)
+                lparam_up = lparam_down | (1 << 30) | (1 << 31)
+                
+                self.debug_console.log(f"[WINAPI] Sending ENTER: VK=0x{VK_RETURN:02X}, HWND={hex(hwnd)}")
+                self.PostMessageW(hwnd, self.WM_KEYDOWN, VK_RETURN, lparam_down)
+                self.PostMessageW(hwnd, self.WM_KEYUP, VK_RETURN, lparam_up)
+                self.debug_console.log(f"[JSIDPLAY2] ✓ Sent ENTER after '{char}'")
+                time.sleep(0.1)
+            
+            self.debug_console.log(f"[WINAPI] ✓ Character sequence sent successfully")
+            return True
+        except Exception as e:
+            self.debug_console.log(f"[WINAPI] ✗ Error sending jsidplay2 sequence: {e}")
+            return False

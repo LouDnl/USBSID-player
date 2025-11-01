@@ -1,0 +1,473 @@
+jsidplay2-console.exe --engine USBSID --usbSidAudio 1 example.sid
+< > - play previous/next song
+h e - play first/last tune
+, . - normal/faster speed
+n   - play next tune
+p   - pause/continue player
+1   - mute voice 1
+2   - mute voice 2
+3   - mute voice 3
+4   - mute samples
+5   - mute voice 1 (stereo-SID)
+6   - mute voice 2 (stereo-SID)
+7   - mute voice 3 (stereo-SID)
+8   - mute samples (stereo-SID)
+9   - mute voice 1 (3-SID)
+a   - mute voice 2 (3-SID)
+b   - mute voice 3 (3-SID)
+c   - mute samples (3-SID)
+f   - enable/disable filter
+g   - enable/disable stereo filter
+G   - enable/disable 3-SID filter
+w   - WhatsSID enable/disable
+q   - quit player
+
+Use INI file: C:\Users\Density\jsidplay2.ini
+Usage: sidplay.ConsolePlayer [options] Files or folders
+  Options:
+    --enableSidDatabase, -n, --enableDatabase
+      Use song length database
+      Default: true
+    --startTime, -t
+      Song start time delay in seconds
+      Default: 0.0
+    --defaultLength, -g, --defaultPlayLength
+      Set default play length in seconds (0 means endless)
+      Default: 0.0
+    --fadeIn, --fadeInTime
+      Increase volume at the start in seconds
+      Default: 0.0
+    --fadeOut, --fadeOutTime
+      Decrease volume at the end in seconds
+      Default: 0.0
+    --loop, -l
+      Loop Track
+      Default: false
+    --single, -s
+      Single Song
+      Default: false
+    --hvsc
+      Location of HVSC directory
+    --palEmulation
+      Use PAL Emulation
+      Default: true
+    --turboTape
+      Use turbo tape for conversion of non-tape formats
+      Default: true
+    --jiffydos, --jiffyDosInstalled
+      Use JiffyDos floppy extension
+      Default: false
+    --audio, -a
+      Audio driver
+      Default: SOUNDCARD
+      Possible Values: [SOUNDCARD, WAV, JWAV, FLAC, AAC, MP3, JMP3, FLV, AVI, MP4, SID_REG, SID_DUMP, LIVE_WAV, LIVE_JWAV, LIVE_FLAC, LIVE_AAC, LIVE_MP3, LIVE_JMP3, LIVE_FLV, LIVE_AVI, LIVE_MP4, LIVE_VIDEO_STREAMING, LIVE_SID_REG, LIVE_SID_DUMP, COMPARE_MP3]
+    --deviceIndex, -A
+      Sound Device index for SOUNDCARD audio driver
+      Default: 0
+    --frequency, -f, --samplingRate
+      Sampling frequency in Hz (VERY_LOW=8000 Hz, LOW=44100 Hz, MEDIUM=48000
+      Hz, HIGH=96000 Hz)
+      Default: MEDIUM
+      Possible Values: [VERY_LOW, LOW, MEDIUM, HIGH]
+    --sampling
+      Sampling Method (DECIMATE=linear interpolation, RESAMPLE=more efficient
+      SINC from chaining two other SINCs)
+      Default: DECIMATE
+      Possible Values: [DECIMATE, RESAMPLE]
+    --mainVolume
+      Volume of SID in db (-6db..+6db)
+      Default: 0.0
+    --secondVolume
+      Volume of Stereo SID in db (-6db..+6db)
+      Default: 0.0
+    --thirdVolume
+      Volume of 3rd SID in db (-6db..+6db)
+      Default: 0.0
+    --mainBalance
+      Balance of SID l(0)..r(1)
+      Default: 0.5
+    --secondBalance
+      Balance of Stereo SID l(0)..r(1)
+      Default: 0.5
+    --thirdBalance
+      Balance of 3rd SID l(0)..r(1)
+      Default: 0.5
+    --mainDelay
+      Delay of SID in ms (0ms..50ms)
+      Default: 0
+    --secondDelay
+      Delay of Stereo SID in ms (0ms..50ms)
+      Default: 0
+    --thirdDelay
+      Delay of 3rd SID in ms (0ms..50ms)
+      Default: 0
+    --bufferSize, -B
+      Emulation Buffer Size
+      Default: 65536
+    --audioBufferSize
+      Audio Buffer Size
+      Default: 16384
+    --cbr
+      Audio driver: MP3 recording - Constant bit rate in kbps (-1=auto, 32 40
+      48 56 64 80 96 112 128 160 192 224 256 320)
+      Default: -1
+    --vbr
+      Audio driver: MP3 recording - Use variable bitrate instead of constant
+      bitrate
+      Default: false
+    --vbrQuality
+      Audio driver: MP3 recording - Use variable bitrate quality (0=best,
+      5=medium, 9=worst)
+      Default: 5
+    --acBitRate, --audioCoderBitRate
+      Audio Coder: Bit-rate to use, e.g. 128000 (lower quality) ... 320000
+      (higher quality)
+      Default: 128000
+    --acBitRateTolerance, --audioCoderBitRateTolerance
+      Audio Coder: Bit-rate tolerance to use
+      Default: 64000
+    --vcStreamingUrl
+      Sound Treiber: Live Video Streaming - Live Streaming URL for the upload
+      e.g. "rtmp://localhost/live/test"
+    --vcGOP, --videoCoderNumPicturesInGroupOfPictures
+      Video Coder: Minimum number of frames between key-frames
+      Default: 12
+    --vcBitRate, --videoCoderBitRate
+      Video Coder: Bit-rate to use, e.g. PAL/NTSC: 210168/250884 (Low motion)
+      ... 840746/1003536 (high motion)
+      Default: 600000
+    --vcBitRateTolerance, --videoCoderBitRateTolerance
+      Video Coder: Bit-rate tolerance to use
+      Default: 300000
+    --vcGlobalQuality, --videoCoderGlobalQuality
+      Video Coder: Global quality setting this codec uses if a video picture
+      doesn't have a quality set
+      Default: 0
+    --vcPreset, --videoCoderPreset
+      Video Coder: Preset properties of a FFmpeg preset file
+      Default: HQ
+      Possible Values: [VERY_FAST, FAST, NORMAL, HQ, LOSSLESS_ULTRA_FAST, LOSSLESS_FAST, LOSSLESS_MEDIUM, LOSSLESS_MAX]
+    --vcAudioDelay, --videoCoderAudioDelay
+      Video Coder: Audio delay in ms to sync audio and video. A positive value
+      will delay the audio while a negative value will hasten the audio in the
+      video.
+      Default: 0
+    --delayBypass
+      Audio Post Processor: Delay - bypass post processing
+      Default: true
+    --delay
+      Audio Post Processor: Delay - Delay in ms (0ms..100ms)
+      Default: 10
+    --delayWetLevel
+      Audio Post Processor: Delay - Wet Level in percent (0%..100%)
+      Default: 70
+    --delayDryLevel
+      Audio Post Processor: Delay - Dry Level in percent (0%..100%)
+      Default: 70
+    --delayFeedbackLevel
+      Audio Post Processor: Delay - Feedback Level in percent (0%..100%)
+      Default: 10
+    --reverbBypass
+      Audio Post Processor: Schroeder Reverb - bypass reverb post processing
+      Default: true
+    --reverbComb1Delay
+      Audio Post Processor: Schroeder Reverb - Comb1 Delay in
+      ms(1.0ms..100.0ms)
+      Default: 29.7
+    --reverbComb2Delay
+      Audio Post Processor: Schroeder Reverb - Comb2 Delay in
+      ms(1.0ms..100.0ms)
+      Default: 37.1
+    --reverbComb3Delay
+      Audio Post Processor: Schroeder Reverb - Comb3 Delay in
+      ms(1.0ms..100.0ms)
+      Default: 41.1
+    --reverbComb4Delay
+      Audio Post Processor: Schroeder Reverb - Comb4 Delay in
+      ms(1.0ms..100.0ms)
+      Default: 43.7
+    --reverbAllPass1Delay
+      Audio Post Processor: Schroeder Reverb - All Pass1 Delay in
+      ms(1.0ms..50.0ms)
+      Default: 5.0
+    --reverbAllPass2Delay
+      Audio Post Processor: Schroeder Reverb - All Pass2 Delay in
+      ms(1.0ms..50.0ms)
+      Default: 1.7
+    --reverbSustainDelay
+      Audio Post Processor: Schroeder Reverb - Sustain Delay in
+      ms(1ms..1000ms)
+      Default: 500.0
+    --reverbDryWetMix
+      Audio Post Processor: Schroeder Reverb - Dry Wet Mix (0.00..1.00)
+      Default: 0.25
+    --engine, -E
+      SID Engine
+      Default: EMULATION
+      Possible Values: [EMULATION, NETSID, HARDSID, SIDBLASTER, EXSID, USBSID, HARDSID_DLL]
+    --defaultEmulation, -e
+      Default Emulation (RESID, RESIDFP)
+      Default: RESIDFP
+      Possible Values: [DEFAULT, RESID, RESIDFP]
+    --forceEmulation, --userEmulation
+      Force Mono SID Chip Emulation to RESID or RESIDFP (DEFAULT means default
+      emulation)
+      Default: DEFAULT
+      Possible Values: [DEFAULT, RESID, RESIDFP]
+    --forceStereoEmulation, --stereoEmulation
+      Force Stereo SID Chip Emulation to RESID or RESIDFP (DEFAULT means
+      default emulation)
+      Default: DEFAULT
+      Possible Values: [DEFAULT, RESID, RESIDFP]
+    --forceThirdEmulation, --thirdEmulation
+      Force 3-SID Chip Emulation to RESID or RESIDFP (DEFAULT means default
+      emulation)
+      Default: DEFAULT
+      Possible Values: [DEFAULT, RESID, RESIDFP]
+    --defaultClock, -k, --defaultClockSpeed
+      Set default VIC clock speed PAL or NTSC (to be used, if UNKNOWN)
+      Default: PAL
+      Possible Values: [AUTO, PAL, NTSC]
+    --forceClock, -c, --userClockSpeed
+      Force user specific VIC clock speed PAL or NTSC (default: defined by
+      song)
+      Default: AUTO
+      Possible Values: [AUTO, PAL, NTSC]
+    --defaultModel, -u, --defaultSidModel
+      Default SID Chip Model MOS8580 or MOS6581 (to be used, if UNKNOWN)
+      Default: MOS8580
+      Possible Values: [AUTO, MOS6581, MOS8580]
+    --forceModel, -m, --userSidModel
+      Force Mono SID Chip Model to MOS8580 or MOS6581 (default: from tune or
+      cfg)
+      Default: AUTO
+      Possible Values: [AUTO, MOS6581, MOS8580]
+    --forceStereoModel, --stereoSidModel
+      Force Stereo SID Chip Model to MOS8580 or MOS6581 (AUTO means use
+      default model)
+      Default: AUTO
+      Possible Values: [AUTO, MOS6581, MOS8580]
+    --forceThirdModel, --thirdSIDModel
+      Force 3-SID Chip Model to MOS8580 or MOS6581 (AUTO means use default
+      model)
+      Default: AUTO
+      Possible Values: [AUTO, MOS6581, MOS8580]
+    --hardSid6581
+      HardSID 6581 device number
+      Default: 0
+    --hardSid8580
+      HardSID 8580 device number
+      Default: 1
+    --usbSidAudio
+      USBSID-Pico audio setting
+      Default: 0
+    --sidBlasterRead
+      Use hardware for READ access otherwise emulated READs
+      Default: false
+    --sidBlasterLatencyTimer
+      The receive buffer timeout (2ms..255ms) that is used to flush remaining
+      data from the receive buffer
+      Default: 2
+    --exsidFakeStereo
+      ExSID fake stereo: Save bandwidth. ExSID device writes to both chips
+      simultaneously.
+      Default: true
+    --NetSIDDevHost
+      Hostname of the Network SID Device
+      Default: 127.0.0.1
+    --NetSIDDevPort
+      Port of the Network SID Device
+      Default: 6581
+    --ultimate64Mode
+      Ultimate64 mode
+      Default: OFF
+      Possible Values: [OFF, STANDALONE, SIMULTANEOUS]
+    --Ultimate64Host
+      Ultimate64 Hostname
+      Default: 127.0.0.1
+    --Ultimate64Port
+      Ultimate64 Port
+      Default: 64
+    --Ultimate64SyncDelay
+      Sync delay between JSIDPlay2 and Ultimate64 in ms
+      Default: 720
+    --disableFilter, -i, --filter
+      Turn off SID filter emulation
+      Default: true
+    --disableStereoFilter, -j, --stereoFilter
+      Turn off stereo SID filter emulation
+      Default: true
+    --disable3rdSidFilter, -J, --thirdSIDFilter
+      Turn off 3rd SID filter emulation
+      Default: true
+    --sidToRead
+      Fake stereo: SID number to process READs
+      Default: FIRST_SID
+      Possible Values: [FIRST_SID, SECOND_SID, THIRD_SID]
+    --digiBoosted8580
+      Digi-sample Boost of SID 8580
+      Default: false
+    --dualSIDBase, --dualSidBase
+      Dual SID adress
+      Default: 54304
+    --thirdSIDBase
+      third SID adress
+      Default: 54336
+    --fakeStereo
+      Fake stereo
+      Default: false
+    --dualSID, -d, --forceStereoTune
+      Force dual SID environment
+      Default: false
+    --thirdSID, -D, --force3SIDTune
+      Force third SID environment
+      Default: false
+    --muteVoice1, -1
+      mute voice 1
+      Default: false
+    --muteVoice2, -2
+      mute voice 2
+      Default: false
+    --muteVoice3, -3
+      mute voice 3
+      Default: false
+    --muteVoice4, -4
+      mute samples
+      Default: false
+    --muteStereoVoice1, -5
+      mute voice 1 (stereo-SID)
+      Default: false
+    --muteStereoVoice2, -6
+      mute voice 2 (stereo-SID)
+      Default: false
+    --muteStereoVoice3, -7
+      mute voice 3 (stereo-SID)
+      Default: false
+    --muteStereoVoice4, -8
+      mute samples (stereo-SID)
+      Default: false
+    --muteThirdSidVoice1, -9, --muteThirdSIDVoice1
+      mute voice 1 (3-SID)
+      Default: false
+    --muteThirdSidVoice2, --muteThirdSIDVoice2
+      mute voice 2 (3-SID)
+      Default: false
+    --muteThirdSidVoice3, --muteThirdSIDVoice3
+      mute voice 3 (3-SID)
+      Default: false
+    --muteThirdSidVoice4, --muteThirdSIDVoice4
+      mute samples (3-SID)
+      Default: false
+    --filter6581
+      Filter name of SID 6581 (RESID)
+      Default: FilterAverage6581
+    --stereoFilter6581
+      Filter name of Stereo SID 6581 (RESID)
+      Default: FilterAverage6581
+    --thirdFilter6581, --thirdSIDFilter6581
+      Filter name of 3rd SID 6581 (RESID)
+      Default: FilterAverage6581
+    --filter8580
+      Filter name of SID 8580 (RESID)
+      Default: FilterAverage8580
+    --stereoFilter8580
+      Filter name of Stereo SID 8580 (RESID)
+      Default: FilterAverage8580
+    --thirdFilter8580, --thirdSIDFilter8580
+      Filter name of 3rd SID 8580 (RESID)
+      Default: FilterAverage8580
+    --reSIDfpFilter6581
+      Filter name of SID 6581 (RESIDFP)
+      Default: FilterAlankila6581R4AR_3789
+    --reSIDfpStereoFilter6581
+      Filter name of Stereo SID 6581 (RESIDFP)
+      Default: FilterAlankila6581R4AR_3789
+    --reSIDfpThirdFilter6581, --reSIDfpThirdSIDFilter6581
+      Filter name of 3rd SID 6581 (RESIDFP)
+      Default: FilterAlankila6581R4AR_3789
+    --reSIDfpFilter8580
+      Filter name of SID 8580 (RESIDFP)
+      Default: FilterTrurl8580R5_3691
+    --reSIDfpStereoFilter8580
+      Filter name of Stereo SID 8580 (RESIDFP)
+      Default: FilterTrurl8580R5_3691
+    --reSIDfpThirdFilter8580, --reSIDfpThirdSIDFilter8580
+      Filter name of 3rd SID 8580 (RESIDFP)
+      Default: FilterTrurl8580R5_3691
+    --detectPSID64ChipModel
+      Auto-detect PSID64 settings
+      Default: true
+    --whatsSIDEnable
+      Recognizes the currently played tune after a few seconds
+      Default: true
+    --whatsSIDUrl
+      WhatsSID url, in fact JSIDPlay2 running in server mode
+      Default: https://haendel.ddns.net:8443/jsidplay2service/JSIDPlay2REST
+    --whatsSIDUsername
+      WhatsSID Username
+      Default: jsidplay2
+    --whatsSIDPassword
+      WhatsSID Password
+      Default: ********
+    --whatsSIDConnectionTimeout
+      Connection Timeout in ms
+      Default: 5000
+    --whatsSIDCaptureTime
+      Capture the last N seconds for tune recognition
+      Default: 15
+    --whatsSIDMatchStartTime
+      Time (in seconds) when tune recognition should begin
+      Default: 15
+    --whatsSIDMatchRetryTime
+      Time (in seconds) after the tune recognition should continue
+      Default: 15
+    --whatsSIDMinimumRelativeConfidence
+      Minimum relative confidence required to match a tune
+      Default: 4.5
+    --whatsSIDDetectChipModel
+      Auto-detect Emulation settings
+      Default: false
+    --help, -h
+      Display usage
+    --startSong, -o
+      Start song (default: tune start song)
+    --sfxSoundExpander
+      Use SFX Sound Expander [FM-YAM alike]
+      Default: false
+    --sfxSoundExpanderType
+      SFX Sound Expander Type (OPL1: YM3526 = 0, OPL2: YM3812 = 1)
+      Default: 0
+    --verbose, -v
+      Verbose (level=0,1,2)
+      Default: 0
+    --quiet, -q
+      Quiet (no output)
+      Default: false
+
+    --deviceIndex 0 -> Primary Sound Driver (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 1 -> Speakers (FxSound Audio Enhancer) (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 2 -> 0_ONIX Xl1 ALPHA (ONIX XI1) (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 3 -> Speakers (2- Realtek High Definition Audio) (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 4 -> Voicemeeter Input (VB-Audio Voicemeeter VAIO) (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 5 -> Headphones (Sonata BHD) (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 6 -> Realtek Digital Output (2- Realtek High Definition Audio) (Direct Audio Device: DirectSound Playback)
+    --deviceIndex 7 -> Speakers (Spatial Sound Card) (Direct Audio Device: DirectSound Playback)
+Exception in thread "main" java.lang.NoClassDefFoundError: com/sun/jna/Pointer
+        at sidblaster.d2xx.D2XXManager.rescan(D2XXManager.java:47)
+        at sidblaster.d2xx.SIDBlasterEnumerator.deviceCount(SIDBlasterEnumerator.java:27)
+        at sidblaster.async.CommandReceiver.<init>(CommandReceiver.java:27)
+        at sidblaster.async.ThreadCommandReceiver.<init>(ThreadCommandReceiver.java:20)
+        at sidblaster.async.AsyncDispatcher.ensureInitialized(AsyncDispatcher.java:50)
+        at sidblaster.async.AsyncDispatcher.deviceCount(AsyncDispatcher.java:81)
+        at sidblaster.hardsid.HardSIDImpl.HardSID_Devices(HardSIDImpl.java:40)
+        at builder.jsidblaster.JSIDBlasterBuilder.init(JSIDBlasterBuilder.java:91)
+        at builder.jsidblaster.JSIDBlasterBuilder.<init>(JSIDBlasterBuilder.java:84)
+        at sidplay.ConsolePlayer.printHardwareDevices(ConsolePlayer.java:193)
+        at sidplay.ConsolePlayer.execute(ConsolePlayer.java:100)
+        at sidplay.ConsolePlayer.main(ConsolePlayer.java:245)
+Caused by: java.lang.ClassNotFoundException: com.sun.jna.Pointer
+        at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+        at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+        at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+        ... 12 more
+

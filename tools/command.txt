@@ -1,0 +1,1 @@
+D:\jsidplay2\jsidplay2-console-4.12.exe --engine USBSID --usbSidAudio 1
