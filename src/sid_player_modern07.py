@@ -14,6 +14,13 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QPalette, QColor, QLinearGradient, QIcon
 from PyQt5.QtCore import Qt, QTimer, QTime, pyqtSignal
 
+try:
+    import qdarktheme
+    QDARKTHEME_AVAILABLE = True
+except ImportError:
+    QDARKTHEME_AVAILABLE = False
+    print("[WARN] qdarktheme not available, using default theme")
+
 from debug_console import DebugConsoleWidget
 from theme_settings import ThemeSettingsWindow, apply_theme_to_color
 
@@ -1682,6 +1689,32 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         self.debug_console.log(f"[ENGINE] Audio engine changed signal received: {engine_name}")
         self.set_audio_engine(engine_name)
     
+    # ========================================
+    #        DARK TITLEBAR FOR WINDOWS
+    # ========================================
+    def showEvent(self, event):
+        """Handle window show event - set dark title bar when window is fully initialized"""
+        super().showEvent(event)
+        if sys.platform == 'win32':
+            SIDPlayer.set_dark_titlebar(self)
+
+    @staticmethod
+    def set_dark_titlebar(widget):
+        """Ustawianie ciemnego title bar'a dla dowolnego okna na Windows 10/11"""
+        if sys.platform == 'win32':
+            try:
+                hwnd = int(widget.winId())
+                DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_USE_IMMERSIVE_DARK_MODE,
+                    ctypes.byref(ctypes.c_int(1)),
+                    ctypes.sizeof(ctypes.c_int)
+                )
+                print(f"[DARK_THEME] ✓ Dark title bar set for: {widget.windowTitle()}")
+            except Exception as e:
+                print(f"[DARK_THEME] Could not set dark title bar: {e}")
+
     # get_sid_info() moved to sid_info_manager.py (Phase 4 refactoring)
 
 

@@ -22,6 +22,11 @@ class ThemeSettingsWindow(QWidget):
     def __init__(self, parent=None, initial_settings=None, initial_player=None):
         super().__init__(parent)
         
+        # KOREKTA KRYTYCZNA: Ustaw window flags NATYCHMIAST po super().__init__()
+        # Musi być PRZED init_ui() i apply_window_theme(), aby Windows API mogła działać prawidłowo
+        # Jeśli setWindowFlags() jest wołane na koniec, Windows może zignorować Dark Mode WinAPI
+        self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint)
+        
         # Domyślne wartości
         self.settings = {
             'hue': 210,           # 0-360 (210 = niebieski odcień z oryginalnego motywu)
@@ -40,9 +45,6 @@ class ThemeSettingsWindow(QWidget):
         
         self.init_ui()
         self.apply_window_theme()
-        
-        # Ustaw jako osobne okno (nie blokuje głównego)
-        self.setWindowFlags(Qt.Window)
     
     def init_ui(self):
         """Inicjalizacja interfejsu użytkownika"""
@@ -368,6 +370,17 @@ class ThemeSettingsWindow(QWidget):
             self.contrast_slider['slider'].setValue(settings['contrast'])
         if 'temperature' in settings:
             self.temperature_slider['slider'].setValue(settings['temperature'])
+    
+    def showEvent(self, event):
+        """Handle window show event - set dark title bar when window is fully initialized"""
+        super().showEvent(event)
+        if sys.platform == 'win32':
+            # Import here to avoid circular imports
+            try:
+                from sid_player_modern07 import SIDPlayer
+                SIDPlayer.set_dark_titlebar(self)
+            except Exception as e:
+                print(f"[THEME] Could not import SIDPlayer for dark titlebar: {e}")
 
 
 # Funkcje pomocnicze do konwersji kolorów
