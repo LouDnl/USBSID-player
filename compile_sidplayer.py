@@ -18,9 +18,12 @@ def compile_sidplayer():
     print(f"Working directory: {current_dir}")
     
     # Define paths
-    main_script = current_dir / "main.py"
-    tools_dir = current_dir / "tools"
-    assets_dir = current_dir / "assets"
+    source_dir = current_dir / "src" 
+    main_script = source_dir / "main.py"
+    tools_dir = source_dir / "players"
+    assets_dir = source_dir / "assets"
+    config_dir = source_dir / "config"
+    playlists_dir = source_dir / "playlists"
     
     # Verify required files exist
     if not main_script.exists():
@@ -62,8 +65,10 @@ def compile_sidplayer():
         "--windowed",  # No console window
         "--onefile",   # Single executable file
         f"--icon={assets_dir / 'sid_ico.ico'}" if (assets_dir / 'sid_ico.ico').exists() else None,
-        "--add-data", f"{tools_dir}{os.pathsep}tools",
+        "--add-data", f"{tools_dir}{os.pathsep}players",
         "--add-data", f"{assets_dir}{os.pathsep}assets" if assets_dir.exists() else None,
+        "--add-data", f"{config_dir}{os.pathsep}config" if config_dir.exists() else None,
+        "--add-data", f"{playlists_dir}{os.pathsep}playlists" if playlists_dir.exists() else None,
         "--hidden-import=PyQt5.sip",
         "--hidden-import=PyQt5.QtCore",
         "--hidden-import=PyQt5.QtGui",
@@ -165,7 +170,7 @@ def compile_sidplayer_directory_mode():
         print(result.stderr)
         print("="*50)
         print("Compilation completed successfully!")
-        print(f"Executable location: {current_dir / 'dist' / 'SIDPlayer' / 'SIDPlayer.exe'}")
+        print(f"Executable location: {current_dir / 'dist' / 'SIDPlayer' / 'SIDPlayer(.exe)'}")
         return True
         
     except subprocess.CalledProcessError as e:
