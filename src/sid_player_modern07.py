@@ -1330,55 +1330,71 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         self._cleanup_done = True
         print("[EXIT] ===== CLEANUP_ON_EXIT STARTED =====")
         
+        # Otwórz log file
+        log_file = os.path.join(self.base_dir, "exit_debug.log")
+        with open(log_file, "w") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ===== CLEANUP ON EXIT START =====\n")
+            f.write(f"Current process: {self.process}\n")
+            f.write(f"Is playing: {self.is_playing}\n")
+            f.write(f"Sid file: {self.sid_file}\n")
+            f.flush()
+        
+        def log(msg):
+            print(msg)
+            with open(log_file, "a") as f:
+                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+                f.flush()
+        
         self.save_settings()  # Zapisz ostatnio odtwarzany plik
         self._save_playlist_on_exit()  # Zapisz playlistę
-        print("[EXIT] ✓ Settings and playlist saved")
+        log("[EXIT] ✓ Settings and playlist saved")
         
         # Close any open windows (BEFORE audio shutdown, so they don't block exit)
-        print("[EXIT] Closing open windows...")
+        log("[EXIT] Closing open windows...")
         if self.playlist_window:
             try:
                 self.playlist_window.close()
-                print("[EXIT] ✓ Playlist window closed")
+                log("[EXIT] ✓ Playlist window closed")
             except Exception as e:
-                print(f"[EXIT] ⚠️  Error closing playlist window: {e}")
+                log(f"[EXIT] ⚠️  Error closing playlist window: {e}")
         
         if self.theme_window:
             try:
                 self.theme_window.close()
-                print("[EXIT] ✓ Theme window closed")
+                log("[EXIT] ✓ Theme window closed")
             except Exception as e:
-                print(f"[EXIT] ⚠️  Error closing theme window: {e}")
+                log(f"[EXIT] ⚠️  Error closing theme window: {e}")
         
         # FAZA 2: Graceful shutdown using USB SID Pico menu sequence
-        print("[EXIT] FAZA 2: Graceful shutdown of audio engine...")
+        log("[EXIT] FAZA 2: Graceful shutdown of audio engine...")
         if self.audio_engine == "jsidplay2":
             # Use proper USB SID Pico shutdown sequence: 1, 2, 3, q
             success = self.graceful_shutdown_jsidplay2()
-            print(f"[EXIT] ✓ FAZA 2: JSidplay2 shutdown {'successful' if success else 'attempted'}")
+            log(f"[EXIT] ✓ FAZA 2: JSidplay2 shutdown {'successful' if success else 'attempted'}")
         else:
             # For sidplayfp, use standard stop
             self.stop_sid_file()
-            print("[EXIT] ✓ FAZA 2: sidplayfp stopped")
+            log("[EXIT] ✓ FAZA 2: sidplayfp stopped")
         
         # FAZA 4: Final cleanup - wait for process to close gracefully, then hard kill if needed
-        print(f"[EXIT] FAZA 4: Final check - process={self.process}")
+        log(f"[EXIT] FAZA 4: Final check - process={self.process}")
         if self.process:
             try:
                 # Give process 2 seconds to close gracefully after shutdown sequence
-                print(f"[EXIT] Waiting for process PID={self.process.pid} to close gracefully...")
+                log(f"[EXIT] Waiting for process PID={self.process.pid} to close gracefully...")
                 try:
                     self.process.wait(timeout=2)
-                    print("[EXIT] ✓ Process closed gracefully")
+                    log("[EXIT] ✓ Process closed gracefully")
                 except subprocess.TimeoutExpired:
                     # Process didn't close - force kill
-                    print(f"[EXIT] ⚠️  Process did not close after 2 seconds - force killing PID={self.process.pid}")
+                    log(f"[EXIT] ⚠️  Process did not close after 2 seconds - force killing PID={self.process.pid}")
                     self.process.kill()
-                    print("[EXIT] ✓ Process force-killed")
+                    log("[EXIT] ✓ Process force-killed")
             except Exception as e:
-                print(f"[EXIT] ⚠️  Error during final cleanup: {e}")
+                log(f"[EXIT] ⚠️  Error during final cleanup: {e}")
         
-        print("[EXIT] ✓✓✓ CLEANUP COMPLETE ✓✓✓")
+        log("[EXIT] ✓✓✓ CLEANUP COMPLETE ✓✓✓")
+        log(f"[EXIT] Log saved to: {log_file}")
 
     # ----------------------------------------------
     #               CZAS + METADANE

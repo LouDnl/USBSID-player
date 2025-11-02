@@ -1,0 +1,14 @@
+[2025-11-01 15:31:01] ===== CLEANUP ON EXIT START =====
+Current process: <Popen: returncode: None args: ['n:\\- Programs\\Thonny\\- MOJE\\sidplayer\\...>
+Is playing: True
+Sid file: N:\- Programs\Thonny\- MOJE\sidplayer\Sids\The_Syndrom\Roll_Over.sid
+[2025-11-01 15:31:01] [EXIT] ✓ Settings and playlist saved
+[2025-11-01 15:31:01] [EXIT] Closing open windows...
+[2025-11-01 15:31:01] [EXIT] ✓ Playlist window closed
+[2025-11-01 15:31:01] [EXIT] FAZA 2: Graceful shutdown of audio engine...
+[2025-11-01 15:31:02] [EXIT] ✓ FAZA 2: JSidplay2 shutdown successful
+[2025-11-01 15:31:02] [EXIT] FAZA 4: Final check - process=<Popen: returncode: None args: ['n:\\- Programs\\Thonny\\- MOJE\\sidplayer\\...>
+[2025-11-01 15:31:02] [EXIT] Waiting for process PID=11648 to close gracefully...
+[2025-11-01 15:31:02] [EXIT] ✓ Process closed gracefully
+[2025-11-01 15:31:02] [EXIT] ✓✓✓ CLEANUP COMPLETE ✓✓✓
+[2025-11-01 15:31:02] [EXIT] Log saved to: n:\- Programs\Thonny\- MOJE\sidplayer\exit_debug.log
