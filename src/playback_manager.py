@@ -264,8 +264,8 @@ class PlaybackManagerMixin:
                 "Audio Engine Not Found", 
                 f"Engine '{engine_name}' not found at:\n{engine_executable}\n\n"
                 f"Available engines in directory:\n"
-                f"- sidplayfp.exe\n"
-                f"- jsidplay2-console.exe"
+                f"- {self.sidplayfp}\n"
+                f"- {self.jsidplay2}"
             )
             return
         
@@ -290,10 +290,10 @@ class PlaybackManagerMixin:
             
             # Jeśli to nie pierwsze odtwarzanie, wyślij komendy '<' aby dostać się na właściwy subtune
             # (this will be handled after process starts via interactive commands)
-        else:
+        elif self.audio_engine == "sidplayfp":
             # sidplayfp wymaga formatu: sidplayfp.exe -s<subtune> [-ol | -t<time>] file.sid
             command = [engine_executable]
-            
+            command.append(f"--usbsid")
             # Dodaj parametr subtune
             command.append(f"-s{self.current_subtune}")
             self.debug_console.log(f"[INFO] sidplayfp: Playing subtune {self.current_subtune}/{self.num_subtunes}")

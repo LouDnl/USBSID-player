@@ -69,6 +69,24 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         super().__init__()
         self.setObjectName("SIDPlayerRoot")
 
+        if sys.platform == "linux" or sys.platform == "linux2" or sys.platform == "darwin":
+            self.jsidplay = "jsidplay2-console-usbsid.sh"
+            self.sidplayfp = "sidplayfp"
+        elif sys.platform == "win32":
+            self.jsidplay = "jsidplay2-console.exe"
+            self.sidplayfp = "sidplayfp.exe"
+        else:
+            # Default value for other, unforeseen systems
+            self.jsidplay = "jsidplay2-console.exe"
+            self.sidplayfp = "sidplayfp.exe"
+
+        # --- PATHS ---
+        self.assetpath = "assets"
+        self.logpath = "log"
+        self.configpath = "config"
+        self.playerpath = "players"
+        self.playlistpath = "playlists"
+
         # --- PODSTAWOWA INICJALIZACJA ---
         self.sid_file = None
         self.process = None
@@ -127,7 +145,7 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         # Helper function to find executables (check tools/ subdirectory first)
         def find_executable(name):
             # Try tools subdirectory first
-            tools_path = os.path.join(self.base_dir, "tools", name)
+            tools_path = os.path.join(self.base_dir, self.playerpath, name)
             if os.path.exists(tools_path):
                 return tools_path
             # Try base directory as fallback
@@ -137,11 +155,11 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
             # Return tools path as default (will error with proper message if not found)
             return tools_path
         
-        self.sidplayfp_path = find_executable("sidplayfp.exe")
-        self.jsidplay2_path = find_executable("jsidplay2-console.exe")
-        self.settings_path = os.path.join(self.base_dir, "settings.ini")
-        self.songlengths_path = find_executable("Songlengths.md5")  # Also check tools/
-        self.playlist_file_path = os.path.join(self.base_dir, "sidplayer_playlist.json")
+        self.sidplayfp_path = find_executable(self.sidplayfp)
+        self.jsidplay2_path = find_executable(self.jsidplay)
+        self.settings_path = os.path.join(self.base_dir, self.configpath, "settings.ini")
+        self.songlengths_path = os.path.join(self.assetpath, "Songlengths.md5")
+        self.playlist_file_path = os.path.join(self.base_dir, self.playlistpath, "sidplayer_playlist.json")
         
         # --- AUDIO ENGINE SELECTION ---
         self.audio_engine = "sidplayfp"  # Default engine
@@ -180,7 +198,7 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         self.init_ui()
         
         # --- WINDOW ICON ---
-        icon_path = os.path.join(self.base_dir, "assets", "sid_ico.png")
+        icon_path = os.path.join(self.base_dir, self.assetpath, "sid_ico.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         self.setWindowTitle("SID Player")
@@ -498,7 +516,7 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
     def _log_error_to_file(self, error_message):
         """Zaloguj błąd do pliku sidplayer_error.txt"""
         try:
-            error_file_path = os.path.join(self.base_dir, "sidplayer_error.txt")
+            error_file_path = os.path.join(self.base_dir, self.logpath, "sidplayer_error.txt")
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             with open(error_file_path, "a", encoding="utf-8") as f:
                 f.write(f"[{timestamp}] {error_message}\n")
@@ -1331,7 +1349,7 @@ class SIDPlayer(WindowsAPIManagerMixin, PlaybackManagerMixin, SIDInfoMixin, UITh
         print("[EXIT] ===== CLEANUP_ON_EXIT STARTED =====")
         
         # Otwórz log file
-        log_file = os.path.join(self.base_dir, "exit_debug.log")
+        log_file = os.path.join(self.base_dir, self.logpath, "exit_debug.log")
         with open(log_file, "w") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] ===== CLEANUP ON EXIT START =====\n")
             f.write(f"Current process: {self.process}\n")
